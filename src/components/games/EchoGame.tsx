@@ -3,74 +3,74 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { motion } from "motion/react";
 import { EchoRoundData } from "../../types";
 import { setupEchoRound } from "../../utils/gameLogic";
-import { hslToCss } from "../../utils/color";
-import { GetReady } from "../GetReady";
+import { hslToCss, HSL } from "../../utils/color";
+import { GameHead, Ready, Verdict, Btn, Wobble } from "../ui/Kit";
+import { EchoGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
 interface GameProps {
   accentColor: string;
   onBack: () => void;
+  onPlayed?: () => void;
 }
 
-export const EchoGame: React.FC<GameProps> = ({ accentColor, onBack }) => {
+/* A pad rests as a pale tint of its own color and flashes to full color */
+const tint = (c: HSL) => hslToCss({ h: c.h, s: Math.round(c.s * 0.45), l: 91 });
+
+export const EchoGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
   const [stage, setStage] = useState<"getReady" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundData, setRoundData] = useState<EchoRoundData>(() => setupEchoRound());
+  const [round, setRound] = useState(1);
   const [activeStimulusIndex, setActiveStimulusIndex] = useState<number>(-1);
   const [replayIndex, setReplayIndex] = useState<number>(-1);
-  const [autoAdvanceTimer, setAutoAdvanceTimer] = useState<number | null>(null);
   const [countdown, setCountdown] = useState<number>(5);
+  const autoAdvanceTimer = useRef<number | null>(null);
 
-  // Restart/Next Round
   const handleNextRound = () => {
-    if (autoAdvanceTimer) {
-      clearTimeout(autoAdvanceTimer);
-      setAutoAdvanceTimer(null);
+    if (autoAdvanceTimer.current) {
+      clearTimeout(autoAdvanceTimer.current);
+      autoAdvanceTimer.current = null;
     }
     setRoundData(setupEchoRound());
+    setRound((r) => r + 1);
     setActiveStimulusIndex(-1);
     setReplayIndex(-1);
     setStage("getReady");
     setCountdown(5);
   };
 
-  // Play stimulus sequence
+  /* Fire the sequence (unchanged timing) */
   useEffect(() => {
     if (stage === "stimulus") {
       let step = 0;
-      
       const playStep = () => {
         if (step < roundData.sequence.length) {
-          const squareIdx = roundData.sequence[step];
-          setActiveStimulusIndex(squareIdx);
+          setActiveStimulusIndex(roundData.sequence[step]);
           playTick();
           step++;
-          setTimeout(playStep, 600); // 0.6s per square
+          setTimeout(playStep, 600);
         } else {
           setActiveStimulusIndex(-1);
-          setTimeout(() => {
-            setStage("answer");
-          }, 350);
+          setTimeout(() => setStage("answer"), 350);
         }
       };
-
       const startTimer = setTimeout(playStep, 600);
       return () => clearTimeout(startTimer);
     }
   }, [stage, roundData.sequence]);
 
-  // Play reveal and replay sequence
+  /* Reveal: replay the true sequence at tempo */
   useEffect(() => {
     if (stage === "reveal") {
       playRevealInterval();
-      
-      const interval = setInterval(() => {
-        setCountdown((prev) => Math.max(0, prev - 1));
-      }, 1000);
+      onPlayed?.();
 
-      // Replay sequence at same tempo
+      const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
+
       let replayStep = 0;
       const playReplay = () => {
         if (replayStep < roundData.sequence.length) {
@@ -82,14 +82,10 @@ export const EchoGame: React.FC<GameProps> = ({ accentColor, onBack }) => {
           setReplayIndex(-1);
         }
       };
-
       const replayTimer = setTimeout(playReplay, 500);
 
-      const autoTimer = setTimeout(() => {
-        handleNextRound();
-      }, 5000); // 5s reveal & replay window
-
-      setAutoAdvanceTimer(autoTimer as any);
+      const autoTimer = setTimeout(handleNextRound, 5400);
+      autoAdvanceTimer.current = autoTimer as unknown as number;
 
       return () => {
         clearInterval(interval);
@@ -101,26 +97,17 @@ export const EchoGame: React.FC<GameProps> = ({ accentColor, onBack }) => {
 
   const handleSquareTap = (idx: number) => {
     if (stage !== "answer") return;
-    
-    // Prevent double tapping same square
     if (roundData.userTaps.includes(idx)) return;
 
     playTick();
     triggerHaptic();
 
     const updatedTaps = [...roundData.userTaps, idx];
-    
-    setRoundData((prev) => ({
-      ...prev,
-      userTaps: updatedTaps,
-    }));
+    setRoundData((prev) => ({ ...prev, userTaps: updatedTaps }));
 
     if (updatedTaps.length === 4) {
       const isCorrect = updatedTaps.join(",") === roundData.sequence.join(",");
-      setRoundData((prev) => ({
-        ...prev,
-        isCorrect,
-      }));
+      setRoundData((prev) => ({ ...prev, isCorrect }));
       setStage("reveal");
     }
   };
@@ -128,225 +115,131 @@ export const EchoGame: React.FC<GameProps> = ({ accentColor, onBack }) => {
   const isTapped = (id: number) => roundData.userTaps.includes(id);
   const tapOrder = (id: number) => roundData.userTaps.indexOf(id) + 1;
 
-  return (
-    <div id="echo-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto px-2 justify-between min-h-[480px]">
-      
-      {/* Top status bar (Editorial) */}
-      <div className="flex justify-between items-center text-xs tracking-wider text-smoke font-mono select-none mb-6 pb-3 border-b border-ash uppercase">
-        <span className="font-bold">MODULE 03: PATTERN ECHO</span>
-        {stage === "reveal" && (
-          <span className="text-carbon-black font-bold">NEXT IN {countdown}s</span>
-        )}
-        {stage === "stimulus" && (
-          <span className="text-slate font-bold animate-pulse">WATCH THE FLASHES...</span>
-        )}
-        {stage === "answer" && (
-          <span className="text-carbon-black font-bold">TAP IN THE EXACT ORDER ({roundData.userTaps.length}/4)</span>
-        )}
-      </div>
+  const status =
+    stage === "stimulus" ? "Watch the pads" :
+    stage === "answer" ? `Your turn · ${roundData.userTaps.length}/4` :
+    stage === "reveal" ? `Next in ${countdown}s` :
+    `Round ${String(round).padStart(2, "0")}`;
 
-      {/* Main board */}
-      <div className="flex-1 flex flex-col justify-center py-4">
+  return (
+    <div id="echo-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
+      <GameHead title="Repeat the Pattern" status={status} onBack={onBack} />
+
+      <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
-          <GetReady 
-            name="Repeat the Pattern" 
-            instructions="Watch the 4 physical buttons light up. Remember their order, then press the buttons in that exact same pattern." 
-            accentColor={accentColor} 
-            onComplete={() => setStage("stimulus")} 
+          <Ready
+            name="Repeat the Pattern"
+            instructions="Four pads fire in a sequence. Watch the order, then press them back in exactly that order."
+            glyph={<span className="scale-150 inline-block"><EchoGlyph /></span>}
+            onComplete={() => setStage("stimulus")}
           />
         )}
 
         {stage === "stimulus" && (
-          <div className="flex flex-col items-center">
-            <h3 className="text-sm font-bold tracking-tight text-carbon-black uppercase mb-8 text-center animate-pulse">
-              RECORDING PATTERN SEQUENCE...
-            </h3>
-            
-            {/* Flat Brutalist tray */}
-            <div className="p-8 bg-paper-white rounded-[32px] border border-ash/40 w-full max-w-sm">
-              <div className="grid grid-cols-4 gap-4">
-                {roundData.squares.map((sq) => {
-                  const isActive = activeStimulusIndex === sq.id;
-                  const activeColor = hslToCss(sq.color);
-                  
-                  return (
-                    <div
-                      key={sq.id}
-                      id={`echo-stimulus-square-${sq.id}`}
-                      className={`aspect-square w-full rounded-xl border transition-all duration-150 flex items-center justify-center relative ${
-                        isActive 
-                          ? "bg-mist-gray border-carbon-black scale-95" 
-                          : "bg-paper-white border-ash hover:bg-mist-gray/40"
-                      }`}
-                    >
-                      {/* Central concave circle */}
-                      <div className="w-8 h-8 rounded-full bg-mist-gray/60 flex items-center justify-center">
-                        {/* Glow LED inside */}
-                        <div 
-                          className="w-3.5 h-3.5 rounded-full transition-all duration-150"
-                          style={{
-                            backgroundColor: isActive ? activeColor : "transparent",
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+          <div className="flex flex-col items-center gap-7">
+            <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-mut">
+              Watch the order
+            </span>
+            <div className="grid grid-cols-2 gap-3 w-full max-w-[300px]">
+              {roundData.squares.map((sq) => {
+                const isActive = activeStimulusIndex === sq.id;
+                return (
+                  <motion.div
+                    key={sq.id}
+                    id={`echo-stimulus-square-${sq.id}`}
+                    animate={isActive ? { scale: 1.06 } : { scale: 1 }}
+                    transition={{ type: "spring", stiffness: 500, damping: 20 }}
+                    className="aspect-square w-full rounded-2xl border-[1.5px] border-line"
+                    style={{ backgroundColor: isActive ? hslToCss(sq.color) : tint(sq.color) }}
+                  />
+                );
+              })}
             </div>
           </div>
         )}
 
         {stage === "answer" && (
-          <div className="flex flex-col items-center">
-            <h3 className="text-sm font-bold tracking-tight text-carbon-black uppercase mb-8 text-center">
-              Replay the pattern sequence:
-            </h3>
-
-            {/* Tap Panel */}
-            <div className="p-8 bg-paper-white rounded-[32px] border border-ash/40 w-full max-w-sm">
-              <div className="grid grid-cols-4 gap-4">
-                {roundData.squares.map((sq) => {
-                  const hasBeenTapped = isTapped(sq.id);
-                  const order = tapOrder(sq.id);
-                  const activeColor = hslToCss(sq.color);
-
-                  return (
-                    <button
-                      key={sq.id}
-                      id={`echo-answer-square-${sq.id}`}
-                      onClick={() => handleSquareTap(sq.id)}
-                      className={`aspect-square w-full rounded-xl border transition-all duration-100 flex items-center justify-center relative cursor-pointer focus:outline-none ${
-                        hasBeenTapped
-                          ? "bg-mist-gray border-carbon-black scale-95"
-                          : "bg-paper-white border-ash hover:bg-mist-gray/40 active:scale-95"
-                      }`}
-                      aria-label={`Sequence square ${sq.id + 1}`}
-                    >
-                      {/* Inner circle */}
-                      <div className="w-8 h-8 rounded-full bg-mist-gray/40 flex items-center justify-center">
-                        <div 
-                          className="w-3.5 h-3.5 rounded-full transition-all duration-100 flex items-center justify-center"
-                          style={{
-                            backgroundColor: hasBeenTapped ? activeColor : "transparent",
-                          }}
-                        >
-                          {hasBeenTapped && (
-                            <span className="text-[10px] font-mono font-black text-carbon-black select-none">
-                              {order}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+          <div className="flex flex-col items-center gap-7">
+            <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-ink tabular-nums">
+              Press them back · {roundData.userTaps.length}/4
+            </span>
+            <div className="grid grid-cols-2 gap-3 w-full max-w-[300px]">
+              {roundData.squares.map((sq) => {
+                const tapped = isTapped(sq.id);
+                return (
+                  <button
+                    key={sq.id}
+                    id={`echo-answer-square-${sq.id}`}
+                    onClick={() => handleSquareTap(sq.id)}
+                    className={`cell-pop aspect-square w-full rounded-2xl relative cursor-pointer ${
+                      tapped ? "border-2 border-ink" : "border-[1.5px] border-line"
+                    }`}
+                    style={{ backgroundColor: tapped ? hslToCss(sq.color) : tint(sq.color) }}
+                    aria-label={`Pad ${sq.id + 1}`}
+                  >
+                    {tapped && (
+                      <motion.span
+                        initial={{ scale: 1.6, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: "spring", stiffness: 480, damping: 18 }}
+                        className="absolute top-2 left-2 w-7 h-7 rounded-full bg-ink text-paper font-mono font-extrabold text-[13px] flex items-center justify-center tabular-nums"
+                      >
+                        {tapOrder(sq.id)}
+                      </motion.span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center w-full animate-fade-in">
-            
-            {/* Visual Panel feedback */}
-            <div className="w-full max-w-sm p-6 mb-6 rounded-[32px] border border-ash/40 bg-paper-white flex flex-col items-center text-center">
-              
-              {/* Dual feedback lamps */}
-              <div className="flex justify-center gap-12 mb-4">
-                <div className="flex flex-col items-center gap-1.5">
-                  <div 
-                    className={`w-6 h-6 rounded-full transition-all duration-300 ${
-                      roundData.isCorrect 
-                        ? "bg-mint-chip border-2 border-carbon-black" 
-                        : "bg-mist-gray border border-ash"
-                    }`}
-                  />
-                  <span className="text-[9px] tracking-widest text-smoke font-mono font-bold">MATCH</span>
-                </div>
-
-                <div className="flex flex-col items-center gap-1.5">
-                  <div 
-                    className={`w-6 h-6 rounded-full transition-all duration-300 ${
-                      !roundData.isCorrect 
-                        ? "bg-carbon-black border-2 border-carbon-black" 
-                        : "bg-mist-gray border border-ash"
-                    }`}
-                  />
-                  <span className="text-[9px] tracking-widest text-smoke font-mono font-bold">ERROR</span>
-                </div>
-              </div>
-
-              {/* Simple human-friendly text */}
-              <h3 className="text-2xl font-extrabold tracking-tight font-display text-carbon-black uppercase leading-none mb-2">
-                {roundData.isCorrect ? "Perfect Memory!" : "Pattern Missed"}
-              </h3>
-              <p className="text-xs text-smoke font-mono uppercase tracking-wider">
-                {roundData.isCorrect ? "You echoed the system rhythm perfectly." : "Observe the correct sequence playback:"}
-              </p>
-            </div>
-
-            {/* Replay Sequence Panel */}
-            <div className="p-8 bg-paper-white rounded-[32px] border border-ash/40 w-full max-w-sm">
-              <div className="grid grid-cols-4 gap-4">
+          <div className="flex flex-col items-center gap-9">
+            <Wobble active={!roundData.isCorrect} className="w-full max-w-[300px]">
+              <div className="grid grid-cols-2 gap-3 w-full">
                 {roundData.squares.map((sq) => {
                   const isReplaying = replayIndex === sq.id;
-                  const wasTapped = roundData.userTaps.includes(sq.id);
-                  const activeColor = hslToCss(sq.color);
-                  
-                  let borderStyle = "border-ash";
-                  if (isReplaying) {
-                    borderStyle = "border-carbon-black border-2 scale-95";
-                  }
-
+                  const seqPos = roundData.sequence.indexOf(sq.id) + 1;
+                  const yourPos = roundData.userTaps.indexOf(sq.id) + 1;
                   return (
-                    <div
+                    <motion.div
                       key={sq.id}
                       id={`echo-reveal-square-${sq.id}`}
-                      className={`aspect-square w-full rounded-xl border transition-all duration-150 flex items-center justify-center relative ${borderStyle} bg-paper-white`}
+                      animate={isReplaying ? { scale: 1.06 } : { scale: 1 }}
+                      transition={{ type: "spring", stiffness: 500, damping: 20 }}
+                      className="aspect-square w-full rounded-2xl relative border-[1.5px] border-line"
+                      style={{ backgroundColor: isReplaying ? hslToCss(sq.color) : tint(sq.color) }}
                     >
-                      <div className="w-8 h-8 rounded-full bg-mist-gray/40 flex items-center justify-center">
-                        <div 
-                          className="w-3.5 h-3.5 rounded-full transition-all duration-100 flex items-center justify-center"
-                          style={{
-                            backgroundColor: (isReplaying || wasTapped) ? activeColor : "transparent",
-                          }}
-                        >
-                          {isReplaying && (
-                            <span className="text-[10px] font-mono font-black text-carbon-black select-none">
-                              ★
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                      {/* True order, and yours when it differs */}
+                      <span className="absolute top-2 left-2 w-7 h-7 rounded-full bg-play-green text-paper font-mono font-extrabold text-[13px] flex items-center justify-center tabular-nums">
+                        {seqPos}
+                      </span>
+                      {yourPos !== seqPos && (
+                        <span className="absolute top-2 left-10 w-7 h-7 rounded-full bg-ink text-paper font-mono font-extrabold text-[13px] flex items-center justify-center tabular-nums">
+                          {yourPos}
+                        </span>
+                      )}
+                    </motion.div>
                   );
                 })}
               </div>
-            </div>
+            </Wobble>
 
+            <Verdict
+              id="echo-reveal-verdict"
+              ok={!!roundData.isCorrect}
+              headline={roundData.isCorrect ? "Perfect echo." : "Sequence scrambled."}
+              detail={
+                roundData.isCorrect
+                  ? "You played the pattern back exactly."
+                  : "Green is the true order, ink is yours. Watch the replay."
+              }
+              nextIn={countdown}
+            />
+
+            <Btn id="echo-next-btn" variant="secondary" onClick={handleNextRound}>Next pattern</Btn>
           </div>
-        )}
-      </div>
-
-      {/* Footer controls */}
-      <div className="h-16 flex items-center justify-between select-none border-t border-ash mt-6 pt-2">
-        <button 
-          id="echo-back-btn"
-          onClick={onBack}
-          className="text-[10px] tracking-widest font-mono font-bold text-smoke hover:text-carbon-black transition-colors cursor-pointer flex items-center gap-1.5 focus:outline-none"
-        >
-          ← EXIT MODULE
-        </button>
-
-        {stage === "reveal" && (
-          <button 
-            id="echo-next-btn"
-            onClick={handleNextRound}
-            className="px-6 py-2.5 rounded-lg text-xs font-mono font-black tracking-widest cursor-pointer bg-carbon-black text-paper-white hover:bg-carbon-black/90 active:scale-95 transition-all focus:outline-none"
-          >
-            NEXT ROUND →
-          </button>
         )}
       </div>
     </div>

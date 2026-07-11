@@ -3,20 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from "react";
-import { Volume2, VolumeX, Moon, Sun, ArrowLeft } from "lucide-react";
+import React, { Suspense, lazy, useState } from "react";
+import { motion, MotionConfig } from "motion/react";
 import { GameId } from "./types";
-import { toggleSound, isSoundEnabled, playTick, triggerHaptic } from "./utils/audio";
-import { 
-  SwatchIcon, 
-  MixIcon, 
-  EchoIcon, 
-  BetweenIcon, 
-  ShiftIcon, 
-  TallyIcon 
-} from "./components/GameIcons";
+import { toggleSound, playTick, triggerHaptic } from "./utils/audio";
+import { PoloMark, SwatchGlyph, MixGlyph, EchoGlyph, BetweenGlyph, ShiftGlyph, TallyGlyph } from "./components/ui/Glyphs";
+import { Streak } from "./components/ui/Kit";
 
-// Import mini-game components
 import { SwatchGame } from "./components/games/SwatchGame";
 import { MixGame } from "./components/games/MixGame";
 import { EchoGame } from "./components/games/EchoGame";
@@ -24,86 +17,71 @@ import { BetweenGame } from "./components/games/BetweenGame";
 import { ShiftGame } from "./components/games/ShiftGame";
 import { TallyGame } from "./components/games/TallyGame";
 
-// 50-year-old friendly simplified names and descriptions
+/* three.js is loaded lazily so the game itself never waits on it */
+const AmbientBlocks = lazy(() => import("./components/AmbientBlocks"));
+
 const gamesList = [
   {
     id: "swatch" as GameId,
     name: "Color Match",
-    oneLiner: "Look at a color, then find it in a grid of similar colors.",
-    accent: "#E54B3B", // Braun Red-Orange
-    icon: SwatchIcon,
+    oneLiner: "Spot the exact color among near-identical impostors.",
+    accent: "#ff4b3e",
+    glyph: <SwatchGlyph />,
   },
   {
     id: "mix" as GameId,
     name: "Color Mixer",
-    oneLiner: "Slide the dials to match the target color perfectly.",
-    accent: "#FF9F00", // Braun Amber-Yellow
-    icon: MixIcon,
+    oneLiner: "Blend the dials until your mix melts into the target.",
+    accent: "#2d6cf6",
+    glyph: <MixGlyph />,
   },
   {
     id: "echo" as GameId,
     name: "Repeat the Pattern",
-    oneLiner: "Watch tiles light up and tap them in that exact order.",
-    accent: "#00E5A3", // Braun minty indicator
-    icon: EchoIcon,
+    oneLiner: "Watch the pads fire, then answer in exact order.",
+    accent: "#ffc400",
+    glyph: <EchoGlyph />,
   },
   {
     id: "between" as GameId,
     name: "Find the Spot",
-    oneLiner: "Slide the dial needle to where the color block belongs on the bar.",
-    accent: "#E54B3B", // Braun Red-Orange
-    icon: BetweenIcon,
+    oneLiner: "Pin the color to its exact home on the gradient.",
+    accent: "#1fbf66",
+    glyph: <BetweenGlyph />,
   },
   {
     id: "shift" as GameId,
     name: "Spot the Difference",
-    oneLiner: "Find the single block that changed color when hidden.",
-    accent: "#3B82F6", // Braun tuning blue
-    icon: ShiftIcon,
+    oneLiner: "One block drifted off-color. Find it.",
+    accent: "#2d6cf6",
+    glyph: <ShiftGlyph />,
   },
   {
     id: "tally" as GameId,
     name: "Count the Dots",
-    oneLiner: "Count the fast dots on the screen before they disappear.",
-    accent: "#FF9F00", // Braun Amber-Yellow
-    icon: TallyIcon,
-  }
+    oneLiner: "Count the dots before they vanish. They get faster.",
+    accent: "#ff4b3e",
+    glyph: <TallyGlyph />,
+  },
 ];
+
+interface Flood {
+  rect: { left: number; top: number; width: number; height: number };
+  color: string;
+  id: GameId;
+  phase: "expand" | "fade";
+}
 
 export default function App() {
   const [activeGame, setActiveGame] = useState<GameId | null>(null);
   const [soundOn, setSoundOn] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
-
-  // Sync theme with document class list
-  useEffect(() => {
-    // Read initial theme preference or set dark
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const initialTheme = media.matches ? "dark" : "light";
-    setTheme(initialTheme);
-    
-    if (initialTheme === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
-  }, []);
-
-  const handleSetTheme = (newTheme: "light" | "dark") => {
-    playTick();
-    triggerHaptic();
-    setTheme(newTheme);
-    if (newTheme === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
-  };
+  const [doneSet, setDoneSet] = useState<Set<GameId>>(new Set());
+  const [flood, setFlood] = useState<Flood | null>(null);
 
   const handleToggleSound = () => {
-    const newState = toggleSound();
-    setSoundOn(newState);
-    if (newState) {
+    const next = toggleSound();
+    setSoundOn(next);
+    if (next) {
       setTimeout(() => {
         playTick();
         triggerHaptic();
@@ -111,199 +89,171 @@ export default function App() {
     }
   };
 
-  const handleSelectGame = (id: GameId) => {
+  /* The Chroma transition: the tile's color floods outward into the game
+     screen — one continuous move, no cut. */
+  const handleSelectGame = (id: GameId, e: React.MouseEvent<HTMLButtonElement>) => {
+    if (flood) return;
     playTick();
     triggerHaptic();
-    setActiveGame(id);
+    const r = e.currentTarget.getBoundingClientRect();
+    const accent = gamesList.find((g) => g.id === id)!.accent;
+    setFlood({
+      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      color: accent,
+      id,
+      phase: "expand",
+    });
   };
 
   const handleBackToHome = () => {
-    playTick();
-    triggerHaptic();
     setActiveGame(null);
   };
 
-  const selectedGameInfo = gamesList.find((g) => g.id === activeGame);
+  const markPlayed = (id: GameId) => {
+    setDoneSet((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  };
+
+  const gameProps = (id: GameId) => ({
+    accentColor: gamesList.find((g) => g.id === id)!.accent,
+    onBack: handleBackToHome,
+    onPlayed: () => markPlayed(id),
+  });
 
   return (
-    <div className="min-h-screen bg-warm-canvas text-carbon-black flex flex-col font-sans select-none antialiased p-4 sm:p-6 md:p-8">
-      
-      {/* Centered Editorial Showroom Layout */}
-      <div className="flex-1 max-w-5xl w-full mx-auto flex flex-col justify-between relative">
-        
-        {/* Editorial Top Control Bar */}
-        <header className="w-full pb-8 mb-8 border-b border-ash flex flex-col md:flex-row justify-between items-start md:items-end gap-6 select-none">
-          <div className="flex items-start gap-4">
-            {activeGame && (
-              <button
-                id="back-btn"
-                onClick={handleBackToHome}
-                className="mt-1 p-3 bg-carbon-black text-paper-white rounded-lg hover:bg-carbon-black/90 active:scale-95 transition-all cursor-pointer focus:outline-none flex items-center justify-center"
-                title="Back to main panel"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-            )}
-            <div className="flex flex-col">
-              <span className="text-5xl md:text-7xl font-extrabold tracking-tight font-display text-carbon-black uppercase leading-0.9">
-                POLO
-              </span>
-              <span className="text-[10px] tracking-widest text-smoke font-mono uppercase mt-1">
-                SENSORY ATTENTION DEVICE — MODEL T2
-              </span>
-            </div>
-          </div>
+    <MotionConfig reducedMotion="user">
+      <div className="min-h-screen bg-paper text-ink flex flex-col font-sans antialiased">
+        <div className="flex-1 w-full max-w-5xl mx-auto px-5 sm:px-8 flex flex-col">
 
-          {/* Sound Control in Brutalist Style */}
-          <div className="flex items-center gap-6">
-            
-            <div className="flex flex-col items-start md:items-end">
-              <span className="text-[9px] tracking-widest text-smoke font-mono uppercase mb-2">AUDIO STATE</span>
+          {/* Top bar — wordmark, session streak, sound */}
+          <header className="flex items-center gap-3.5 pt-7 pb-5 border-b-[1.5px] border-line select-none">
+            <PoloMark />
+            <span className="font-display font-extrabold text-[17px] tracking-[0.02em]">POLO</span>
+            <div className="ml-auto flex items-center gap-5">
+              {!activeGame && <Streak total={gamesList.length} done={doneSet.size} className="hidden sm:flex" />}
               <button
                 id="sound-toggle-btn"
                 onClick={handleToggleSound}
-                className={`relative px-4 py-2 font-mono text-[11px] tracking-widest font-black uppercase transition-all duration-150 cursor-pointer rounded-lg border flex items-center gap-2 select-none ${
-                  soundOn
-                    ? "bg-mint-chip border-carbon-black text-carbon-black"
-                    : "bg-paper-white border-ash hover:border-carbon-black text-slate"
-                }`}
+                className="btn-press bg-paper px-4 py-2 font-mono font-extrabold text-[10.5px] tracking-[0.14em] uppercase flex items-center gap-2 cursor-pointer"
+                aria-pressed={soundOn}
               >
-                <span 
-                  className={`w-2 h-2 rounded-full transition-all duration-300 ${
-                    soundOn 
-                      ? "bg-carbon-black" 
-                      : "bg-ash"
-                  }`}
-                />
-                {soundOn ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-                <span>{soundOn ? "SOUND ON" : "SOUND OFF"}</span>
+                <i className={`w-2 h-2 rounded-full ${soundOn ? "bg-play-green" : "bg-line"}`} />
+                {soundOn ? "Sound on" : "Sound off"}
               </button>
             </div>
+          </header>
 
-          </div>
-        </header>
+          <main className="flex-1 flex flex-col py-8">
+            {!activeGame ? (
+              <div className="flex flex-col flex-1">
+                {/* Head with the quiet 3D moment behind it */}
+                <div className="relative mb-9 min-h-[128px] flex flex-col justify-center">
+                  <Suspense fallback={null}>
+                    <AmbientBlocks />
+                  </Suspense>
+                  <h1 className="relative font-display font-extrabold text-3xl sm:text-5xl tracking-tight text-ink mb-3">
+                    Train your eye.
+                  </h1>
+                  <span className="relative font-mono font-medium text-[11px] tracking-[0.2em] uppercase text-mut tabular-nums">
+                    Daily drill · <b className="text-ink font-extrabold">{doneSet.size} of {gamesList.length}</b> instruments done
+                  </span>
+                </div>
 
-        {/* Dynamic Display Screen Area */}
-        <main className="flex-1 flex flex-col justify-center py-4 select-none">
-          {!activeGame ? (
-            // Home Menu
-            <div className="flex flex-col flex-1 justify-center py-4">
-              
-              {/* Dieter Rams Philosophy Statement */}
-              <div className="max-w-2xl mb-12 px-2">
-                <p className="text-2xl md:text-3xl font-bold tracking-tight text-carbon-black mb-3">
-                  "Weniger, aber besser" — Less, but better.
-                </p>
-                <p className="text-sm text-slate font-medium max-w-lg leading-relaxed">
-                  Train your senses daily. Select an instrument module below to begin. Polo runs on a brutalist-editorial logic: flat paper surfaces, zero elevation effects, and high typographic scale.
-                </p>
-              </div>
-
-              {/* Exquisite flat Grid: 2x3 layout */}
-              <div 
-                id="games-grid"
-                className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 max-w-5xl w-full"
-              >
-                {gamesList.map((game) => {
-                  const IconComponent = game.icon;
-                  return (
-                    <div
+                {/* Game tiles — they land, they don't appear */}
+                <div id="games-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {gamesList.map((game, i) => (
+                    <motion.button
                       key={game.id}
                       id={`game-tile-${game.id}`}
-                      onClick={() => handleSelectGame(game.id)}
-                      className="flex flex-col justify-between p-6 bg-paper-white rounded-[32px] cursor-pointer group transition-all duration-200 hover:bg-mist-gray border border-transparent hover:border-ash min-h-[280px]"
+                      onClick={(e) => handleSelectGame(game.id, e)}
+                      initial={{ opacity: 0, y: 26, rotate: -1.5 }}
+                      animate={{ opacity: 1, y: 0, rotate: 0 }}
+                      transition={{ delay: 0.05 + i * 0.06, type: "spring", stiffness: 320, damping: 21 }}
+                      className="tile-press bg-paper border-[1.5px] border-line rounded-3xl p-6 pb-5 text-left cursor-pointer flex flex-col"
                     >
-                      {/* Grid Tile Header */}
-                      <div className="flex justify-between items-start">
-                        <div className="flex flex-col gap-1">
-                          <span className="text-[11px] font-mono font-bold tracking-widest text-smoke uppercase">
-                            MODULE
+                      <span className="tile-glyph h-[52px] flex items-center mb-4">{game.glyph}</span>
+                      <span className="font-display font-medium text-[15px] text-ink mb-1.5">{game.name}</span>
+                      <span className="text-[13px] text-mut leading-relaxed mb-5">{game.oneLiner}</span>
+                      <span className="mt-auto flex items-center justify-between">
+                        {doneSet.has(game.id) ? (
+                          <span className="font-mono font-extrabold text-[10px] tracking-[0.14em] uppercase text-paper bg-play-green rounded-full px-2.5 py-1">
+                            Done
                           </span>
-                          <span className="text-lg font-bold tracking-tight text-carbon-black uppercase">
-                            {game.name}
+                        ) : (
+                          <span className="font-mono font-medium text-[10.5px] tracking-[0.14em] uppercase text-mut">
+                            Ready
                           </span>
-                        </div>
-                        
-                        {/* Status tag using the mint or yellow palette */}
-                        <div className="flex items-center">
-                          <span 
-                            className="text-[10px] font-mono font-bold tracking-widest px-2.5 py-1 rounded-[64px] border uppercase"
-                            style={{ 
-                              borderColor: game.accent,
-                              backgroundColor: `${game.accent}20`,
-                              color: game.accent,
-                            }}
-                          >
-                            READY
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Monoline Icon container in the center */}
-                      <div className="flex justify-center my-4 select-none pointer-events-none">
-                        <div className="w-20 h-20 rounded-full bg-mist-gray border border-ash flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
-                          <IconComponent 
-                            className="w-8 h-8 text-carbon-black transition-colors" 
-                            accentColor={game.accent}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Clear, simple, high-contrast label */}
-                      <p className="text-xs font-medium text-slate leading-relaxed text-center group-hover:text-carbon-black transition-colors">
-                        {game.oneLiner}
-                      </p>
-                    </div>
-                  );
-                })}
+                        )}
+                        <span className="font-mono font-extrabold text-[11px] tracking-[0.08em] uppercase text-ink inline-flex items-center gap-1.5">
+                          Play
+                          <svg width="13" height="12" viewBox="0 0 14 12" aria-hidden="true">
+                            <path d="M1.5 6h10.5M7.6 1.6 12 6l-4.4 4.4" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </span>
+                      </span>
+                    </motion.button>
+                  ))}
+                </div>
               </div>
-            </div>
-          ) : (
-            // Mini-Game Frame with Clean Transition
-            <div className="flex-1 flex flex-col justify-center animate-fade-in">
-              {activeGame === "swatch" && (
-                <SwatchGame accentColor={selectedGameInfo!.accent} onBack={handleBackToHome} />
-              )}
-              {activeGame === "mix" && (
-                <MixGame accentColor={selectedGameInfo!.accent} onBack={handleBackToHome} />
-              )}
-              {activeGame === "echo" && (
-                <EchoGame accentColor={selectedGameInfo!.accent} onBack={handleBackToHome} />
-              )}
-              {activeGame === "between" && (
-                <BetweenGame accentColor={selectedGameInfo!.accent} onBack={handleBackToHome} />
-              )}
-              {activeGame === "shift" && (
-                <ShiftGame accentColor={selectedGameInfo!.accent} onBack={handleBackToHome} />
-              )}
-              {activeGame === "tally" && (
-                <TallyGame accentColor={selectedGameInfo!.accent} onBack={handleBackToHome} />
-              )}
-            </div>
-          )}
-        </main>
+            ) : (
+              <div className="flex-1 flex flex-col">
+                {activeGame === "swatch" && <SwatchGame {...gameProps("swatch")} />}
+                {activeGame === "mix" && <MixGame {...gameProps("mix")} />}
+                {activeGame === "echo" && <EchoGame {...gameProps("echo")} />}
+                {activeGame === "between" && <BetweenGame {...gameProps("between")} />}
+                {activeGame === "shift" && <ShiftGame {...gameProps("shift")} />}
+                {activeGame === "tally" && <TallyGame {...gameProps("tally")} />}
+              </div>
+            )}
+          </main>
 
-        {/* Brutalist Footer with Clean Lines */}
-        <footer className="w-full mt-12 pt-6 border-t border-ash flex flex-col sm:flex-row justify-between items-center gap-4 text-[10px] tracking-widest font-mono text-smoke uppercase select-none">
-          {/* Functional speaker grille dots without skeuomorphism */}
-          <div className="flex gap-2 items-center">
-            {[...Array(6)].map((_, i) => (
-              <div 
-                key={i} 
-                className="w-1.5 h-1.5 bg-carbon-black rounded-full" 
-              />
-            ))}
-          </div>
+          <footer className="py-6 border-t-[1.5px] border-line flex items-center justify-between font-mono font-medium text-[10px] tracking-[0.18em] uppercase text-mut select-none">
+            <span>Polo · Sensory training</span>
+            <span className="flex items-center gap-2">
+              <i className="w-2 h-2 rounded-full bg-play-green" />
+              Eyes on
+            </span>
+          </footer>
+        </div>
 
-          <span>SYSTEM LOGIC — POLO DIGITAL SENSORY SYNTHESIS</span>
-
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#00FFCC] animate-pulse" />
-            <span className="text-carbon-black">UNIT ONLINE</span>
-          </div>
-        </footer>
-
+        {/* Color-flood transition overlay */}
+        {flood && (
+          <motion.div
+            className="fixed z-50 pointer-events-none"
+            style={{ background: flood.color }}
+            initial={{
+              left: flood.rect.left,
+              top: flood.rect.top,
+              width: flood.rect.width,
+              height: flood.rect.height,
+              borderRadius: 24,
+              opacity: 1,
+            }}
+            animate={
+              flood.phase === "expand"
+                ? { left: 0, top: 0, width: "100vw", height: "100vh", borderRadius: 0, opacity: 1 }
+                : { left: 0, top: 0, width: "100vw", height: "100vh", borderRadius: 0, opacity: 0 }
+            }
+            transition={
+              flood.phase === "expand"
+                ? { duration: 0.44, ease: [0.32, 0.72, 0, 1] }
+                : { duration: 0.34, ease: "easeOut" }
+            }
+            onAnimationComplete={() => {
+              if (flood.phase === "expand") {
+                setActiveGame(flood.id);
+                setFlood({ ...flood, phase: "fade" });
+              } else {
+                setFlood(null);
+              }
+            }}
+          />
+        )}
       </div>
-    </div>
+    </MotionConfig>
   );
 }

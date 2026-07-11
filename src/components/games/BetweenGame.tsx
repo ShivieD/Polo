@@ -4,59 +4,54 @@
  */
 
 import React, { useEffect, useState, useRef } from "react";
+import { motion } from "motion/react";
 import { BetweenRoundData } from "../../types";
 import { setupBetweenRound, interpolateHsl } from "../../utils/gameLogic";
 import { hslToCss } from "../../utils/color";
-import { GetReady } from "../GetReady";
+import { GameHead, Panel, Ready, Verdict, Btn } from "../ui/Kit";
+import { BetweenGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
 interface GameProps {
   accentColor: string;
   onBack: () => void;
+  onPlayed?: () => void;
 }
 
-export const BetweenGame: React.FC<GameProps> = ({ accentColor, onBack }) => {
+export const BetweenGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
   const [stage, setStage] = useState<"getReady" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundData, setRoundData] = useState<BetweenRoundData>(() => setupBetweenRound());
-  const [autoAdvanceTimer, setAutoAdvanceTimer] = useState<number | null>(null);
-  const [countdown, setCountdown] = useState<number>(4);
+  const [round, setRound] = useState(1);
+  const [countdown, setCountdown] = useState<number>(5);
+  const autoAdvanceTimer = useRef<number | null>(null);
   const isDragging = useRef(false);
 
-  // Restart/Next Round
   const handleNextRound = () => {
-    if (autoAdvanceTimer) {
-      clearTimeout(autoAdvanceTimer);
-      setAutoAdvanceTimer(null);
+    if (autoAdvanceTimer.current) {
+      clearTimeout(autoAdvanceTimer.current);
+      autoAdvanceTimer.current = null;
     }
     setRoundData(setupBetweenRound());
+    setRound((r) => r + 1);
     setStage("getReady");
-    setCountdown(4);
+    setCountdown(5);
   };
 
-  // Stimulus timer
   useEffect(() => {
     if (stage === "stimulus") {
-      const timer = setTimeout(() => {
-        setStage("answer");
-      }, 2000); // 2 seconds exposure
+      const timer = setTimeout(() => setStage("answer"), 2000);
       return () => clearTimeout(timer);
     }
   }, [stage]);
 
-  // Auto-advance on reveal
   useEffect(() => {
     if (stage === "reveal") {
       playRevealInterval();
+      onPlayed?.();
 
-      const interval = setInterval(() => {
-        setCountdown((prev) => Math.max(0, prev - 1));
-      }, 1000);
-
-      const timer = setTimeout(() => {
-        handleNextRound();
-      }, 5000); // 5s reveal
-
-      setAutoAdvanceTimer(timer as any);
+      const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
+      const timer = setTimeout(handleNextRound, 5000);
+      autoAdvanceTimer.current = timer as unknown as number;
 
       return () => {
         clearInterval(interval);
@@ -65,34 +60,24 @@ export const BetweenGame: React.FC<GameProps> = ({ accentColor, onBack }) => {
     }
   }, [stage]);
 
-  // Handle click/drag to position on the empty bar
   const updatePosition = (clientX: number) => {
     const bar = document.getElementById("between-empty-bar");
     if (!bar) return;
     const rect = bar.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const fraction = Math.max(0, Math.min(1, x / rect.width));
-    
-    setRoundData((prev) => ({
-      ...prev,
-      guessPosition: fraction,
-    }));
+    const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    setRoundData((prev) => ({ ...prev, guessPosition: fraction }));
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (stage !== "answer") return;
     isDragging.current = true;
     updatePosition(e.clientX);
-    
-    // Set pointer capture to receive moves outside elements
     e.currentTarget.setPointerCapture(e.pointerId);
   };
-
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDragging.current || stage !== "answer") return;
     updatePosition(e.clientX);
   };
-
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDragging.current) return;
     isDragging.current = false;
@@ -103,254 +88,154 @@ export const BetweenGame: React.FC<GameProps> = ({ accentColor, onBack }) => {
 
   const handleDone = () => {
     if (stage !== "answer") return;
-
-    playTick();
-    triggerHaptic();
-
     const score = Math.round(100 * (1 - Math.abs(roundData.guessPosition - roundData.truePosition)));
-    setRoundData((prev) => ({
-      ...prev,
-      score,
-    }));
+    setRoundData((prev) => ({ ...prev, score }));
     setStage("reveal");
   };
 
-  // Get current interpolated target color
   const targetColor = interpolateHsl(roundData.colorStart, roundData.colorEnd, roundData.truePosition);
-  
-  // Create a multi-stop HSL-interpolated gradient to perfectly match our HSL shorter-hue math in CSS
-  const gradientStops = Array.from({ length: 21 }, (_, i) => {
-    const fraction = i / 20;
-    const interpolated = interpolateHsl(roundData.colorStart, roundData.colorEnd, fraction);
-    return hslToCss(interpolated);
-  });
+
+  /* 21-stop gradient so CSS matches the short-hue-path HSL math exactly */
+  const gradientStops = Array.from({ length: 21 }, (_, i) =>
+    hslToCss(interpolateHsl(roundData.colorStart, roundData.colorEnd, i / 20))
+  );
   const gradientStyle = `linear-gradient(to right, ${gradientStops.join(", ")})`;
 
-  const score = roundData.score || 0;
-  const isPerfect = score >= 90;
-  const isGood = score >= 70 && score < 90;
-  const isPoor = score < 70;
+  const score = roundData.score ?? 0;
+  const verdictHead =
+    score >= 95 ? "Surgical." : score >= 85 ? "Sharp eye." : score >= 65 ? "Close." : "Off the mark.";
+  const verdictDetail =
+    score >= 95
+      ? "That is elite hue discrimination."
+      : score >= 85
+        ? "Within a whisker of true."
+        : score >= 65
+          ? "Watch the lightness, not just the hue."
+          : "The gradient lies to everyone at first. Again.";
+
+  const status =
+    stage === "stimulus" ? "Memorize it" :
+    stage === "answer" ? "Where does it live?" :
+    stage === "reveal" ? `Next in ${countdown}s` :
+    `Round ${String(round).padStart(2, "0")}`;
 
   return (
-    <div id="between-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto px-2 justify-between min-h-[480px]">
-      
-      {/* Top status bar */}
-      <div className="flex justify-between items-center text-xs tracking-wider text-smoke font-mono select-none mb-6 pb-3 border-b border-ash uppercase">
-        <span className="font-bold">MODULE 04: GRADIENT POSITION</span>
-        {stage === "reveal" && (
-          <span className="text-carbon-black font-bold">NEXT IN {countdown}s</span>
-        )}
-        {stage === "stimulus" && (
-          <span className="text-slate font-bold animate-pulse">MEMORIZE GRADIENT SPAN...</span>
-        )}
-        {stage === "answer" && (
-          <span className="text-carbon-black font-bold">LOCATE SWATCH ORIGIN</span>
-        )}
-      </div>
+    <div id="between-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
+      <GameHead title="Find the Spot" status={status} onBack={onBack} />
 
-      {/* Main board */}
-      <div className="flex-1 flex flex-col justify-center py-4">
+      <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
-          <GetReady 
-            name="Find the Spot" 
-            instructions="Look at the full gradient bar. We will hide it, show you a single color block, and then you slide the needle to where that block belongs on the scale." 
-            accentColor={accentColor} 
-            onComplete={() => setStage("stimulus")} 
+          <Ready
+            name="Find the Spot"
+            instructions="Study the full gradient. We hide it, show you one color from somewhere inside it, and you pin that color back to its exact home on the bar."
+            glyph={<span className="scale-150 inline-block"><BetweenGlyph /></span>}
+            onComplete={() => setStage("stimulus")}
           />
         )}
 
         {stage === "stimulus" && (
-          <div className="flex flex-col items-center justify-center py-6">
-            <h3 className="text-xs font-mono tracking-widest text-smoke uppercase mb-6 text-center font-bold">
-              MEMORIZING GRADIENT SPECTRUM
-            </h3>
-
-            {/* Premium Gradient bar */}
-            <div className="p-4 bg-paper-white border border-ash/40 rounded-2xl w-full max-w-md">
-              <div 
-                id="between-gradient-bar"
-                className="w-full h-24 rounded-lg border border-ash"
-                style={{ background: gradientStyle }}
-              />
-            </div>
-
-            {/* Amber beacon */}
-            <div className="flex items-center gap-2 mt-8">
-              <span className="w-2.5 h-2.5 rounded-full bg-voltage-yellow border border-carbon-black" />
-              <span className="text-[10px] font-mono tracking-widest text-smoke uppercase font-bold">
-                OBSERVATION FREQUENCY OPEN
-              </span>
-            </div>
-          </div>
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ type: "spring", stiffness: 320, damping: 24 }}
+            className="flex flex-col items-center gap-6"
+          >
+            <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-mut">
+              Memorize the gradient
+            </span>
+            <div
+              id="between-gradient-bar"
+              className="w-full max-w-md h-24 rounded-full border-[1.5px] border-line"
+              style={{ background: gradientStyle }}
+            />
+          </motion.div>
         )}
 
         {stage === "answer" && (
-          <div className="flex flex-col items-center w-full">
-            
-            {/* Color block viewport */}
-            <div className="p-4 bg-paper-white border border-ash/40 rounded-[32px] mb-6 flex flex-col items-center">
-              <div 
+          <div className="flex flex-col items-center w-full gap-7">
+            {/* Target specimen */}
+            <div className="flex items-center gap-5">
+              <div
                 id="between-target-swatch"
-                className="w-32 h-32 rounded-2xl border border-ash/40"
+                className="w-24 h-24 rounded-2xl border-[1.5px] border-line shrink-0"
                 style={{ backgroundColor: hslToCss(targetColor) }}
               />
-              <div className="text-center font-mono text-[9px] text-smoke font-bold tracking-widest uppercase mt-3">
-                TARGET SPECIMEN
-              </div>
+              <p className="text-[14px] text-mut max-w-[26ch] leading-relaxed">
+                <b className="text-ink font-semibold">Where does this color live?</b><br />
+                Drag the needle to the point on the hidden gradient.
+              </p>
             </div>
 
-            <p className="text-xs font-bold tracking-tight text-carbon-black uppercase mb-4 text-center">
-              Slide the pointer below to where this color fits best:
-            </p>
-
-            {/* Flat Brutalist dial tuner */}
-            <div className="w-full max-w-md bg-paper-white p-6 rounded-[32px] border border-ash/40">
-              <div className="w-full relative pb-4 select-none">
-                
-                {/* Horizontal Tick marks */}
-                <div className="flex justify-between px-1 mb-3 h-3 text-[8px] font-mono text-smoke select-none font-bold">
-                  {[...Array(11)].map((_, i) => (
-                    <div key={i} className="flex flex-col items-center gap-1">
-                      <div className={`w-[1px] bg-ash ${i % 5 === 0 ? "h-3 bg-smoke" : "h-1.5"}`} />
-                      {i % 5 === 0 && <span>{i * 10}</span>}
-                    </div>
-                  ))}
-                </div>
-
-                <div 
-                  id="between-empty-bar"
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUp}
-                  className="w-full h-8 bg-mist-gray border border-ash cursor-ew-resize relative flex items-center rounded-lg"
+            {/* The hidden bar — outlined because it's touchable */}
+            <div className="w-full max-w-md">
+              <div
+                id="between-empty-bar"
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                className="w-full h-14 bg-wash border-2 border-ink rounded-full cursor-ew-resize relative select-none touch-none"
+              >
+                <div
+                  className="absolute top-[6px] bottom-[6px] w-[5px] bg-ink rounded-[3px] pointer-events-none"
+                  style={{ left: `${roundData.guessPosition * 100}%`, transform: "translateX(-50%)" }}
                 >
-                  {/* Flat Track pointer */}
-                  <div 
-                    className="absolute w-[3px] h-full bg-carbon-black flex items-center justify-center z-10"
-                    style={{ left: `${roundData.guessPosition * 100}%`, transform: "translateX(-50%)" }}
-                  >
-                    {/* Flat round handle */}
-                    <div className="w-4 h-4 bg-carbon-black border-2 border-paper-white rounded-full absolute -top-3 shadow-sm" />
-                  </div>
+                  <div className="absolute -top-[9px] left-1/2 -translate-x-1/2 w-5 h-5 bg-paper border-[3px] border-ink rounded-full" />
                 </div>
-
-                <div className="flex justify-between font-mono text-[9px] text-smoke uppercase font-bold mt-2">
-                  <span>STARTING REGION</span>
-                  <span>ENDING REGION</span>
-                </div>
+              </div>
+              <div className="flex justify-between font-mono font-medium text-[10px] tracking-[0.14em] text-mut uppercase mt-3 px-1 tabular-nums">
+                <span>0</span><span>50</span><span>100</span>
               </div>
             </div>
 
-            <button
-              id="between-done-btn"
-              onClick={handleDone}
-              className="mt-6 px-8 py-3 font-mono text-xs uppercase tracking-widest font-black transition-all duration-150 cursor-pointer rounded-lg bg-carbon-black text-paper-white hover:bg-carbon-black/95 active:scale-95 focus:outline-none flex items-center gap-2"
-            >
-              <span className="w-2 h-2 rounded-full bg-voltage-yellow" />
-              <span>LOCK ALIGNMENT</span>
-            </button>
+            <Btn id="between-done-btn" onClick={handleDone}>Lock it in</Btn>
           </div>
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center w-full select-none animate-fade-in">
-            {/* Color block viewport */}
-            <div className="p-4 bg-paper-white border border-ash/40 rounded-[32px] mb-6 flex flex-col items-center">
-              <div 
-                id="between-reveal-swatch"
-                className="w-24 h-24 rounded-2xl border border-ash/40"
-                style={{ backgroundColor: hslToCss(targetColor) }}
-              />
-            </div>
-
-            {/* True gradient with markers */}
-            <div className="w-full max-w-md bg-paper-white p-6 rounded-[32px] border border-ash/40 mb-6">
-              <div className="w-full relative h-14 rounded-lg border border-ash" style={{ background: gradientStyle }}>
-                
-                {/* True position line */}
-                <div 
+          <div className="flex flex-col items-center w-full gap-9">
+            {/* Gradient with staggered pins: TRUE above, YOU below — the
+                tags can never collide, even on a perfect guess */}
+            <div className="w-full max-w-md pt-9 pb-8">
+              <div className="relative w-full h-14 rounded-full border-[1.5px] border-line" style={{ background: gradientStyle }}>
+                <motion.div
                   id="between-marker-true"
-                  className="absolute h-full w-[4px] bg-carbon-black"
-                  style={{ 
-                    left: `${roundData.truePosition * 100}%`, 
-                    transform: "translateX(-50%)",
-                    zIndex: 20,
-                  }}
+                  initial={{ opacity: 0, y: -14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ type: "spring", stiffness: 420, damping: 22 }}
+                  className="absolute -top-[14px] bottom-[12px] w-[9px] bg-paper border-2 border-ink rounded-[5px]"
+                  style={{ left: `${roundData.truePosition * 100}%`, transform: "translateX(-50%)" }}
                 >
-                  <div className="absolute -top-7 left-1/2 -translate-x-1/2 text-[9px] font-mono font-black tracking-widest text-paper-white px-2 py-0.5 bg-carbon-black rounded uppercase">
+                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 font-mono font-extrabold text-[9.5px] tracking-[0.1em] text-ink">
                     TRUE
-                  </div>
-                </div>
-
-                {/* Guess position line */}
-                <div 
+                  </span>
+                </motion.div>
+                <motion.div
                   id="between-marker-guess"
-                  className="absolute h-full w-[3px] bg-smoke"
-                  style={{ 
-                    left: `${roundData.guessPosition * 100}%`, 
-                    transform: "translateX(-50%)",
-                    zIndex: 10,
-                  }}
+                  initial={{ opacity: 0, y: -14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ type: "spring", stiffness: 420, damping: 22, delay: 0.12 }}
+                  className="absolute top-[12px] -bottom-[14px] w-[5px] bg-ink rounded-[3px]"
+                  style={{ left: `${roundData.guessPosition * 100}%`, transform: "translateX(-50%)" }}
                 >
-                  <div className="absolute -bottom-7 left-1/2 -translate-x-1/2 text-[9px] font-mono font-black tracking-widest text-carbon-black px-2 py-0.5 bg-voltage-yellow rounded border border-carbon-black uppercase">
-                    GUESSED
-                  </div>
-                </div>
+                  <span className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 font-mono font-extrabold text-[9.5px] tracking-[0.1em] text-ink">
+                    YOU
+                  </span>
+                </motion.div>
               </div>
             </div>
 
-            {/* Scorecard panel */}
-            <div className="w-full max-w-sm p-6 rounded-[32px] border border-ash/40 bg-paper-white flex flex-col items-center">
-              
-              {/* LED lamps */}
-              <div className="flex gap-10 mb-4 select-none">
-                <div className="flex flex-col items-center gap-1">
-                  <div className={`w-4 h-4 rounded-full border transition-all ${isPerfect ? "bg-mint-chip border-carbon-black" : "bg-mist-gray border-ash"}`} />
-                  <span className="text-[9px] tracking-widest font-mono text-smoke font-bold">PERFECT</span>
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                  <div className={`w-4 h-4 rounded-full border transition-all ${isGood ? "bg-voltage-yellow border-carbon-black" : "bg-mist-gray border-ash"}`} />
-                  <span className="text-[9px] tracking-widest font-mono text-smoke font-bold">CLOSE</span>
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                  <div className={`w-4 h-4 rounded-full border transition-all ${isPoor ? "bg-carbon-black border-carbon-black" : "bg-mist-gray border-ash"}`} />
-                  <span className="text-[9px] tracking-widest font-mono text-smoke font-bold">RE-CALIBRATE</span>
-                </div>
-              </div>
+            <Verdict
+              id="between-reveal-score"
+              ok={score >= 85}
+              headline={verdictHead}
+              detail={verdictDetail}
+              score={String(score)}
+              scoreCaption="Accuracy / 100"
+              nextIn={countdown}
+            />
 
-              <div className="text-[10px] tracking-widest font-mono font-bold text-smoke uppercase mb-1">
-                CLOSENESS SCORE
-              </div>
-              <div id="between-reveal-score" className="text-4xl font-extrabold tracking-tight font-display text-carbon-black uppercase">
-                {roundData.score}% MATCH
-              </div>
-
-              <div className="text-xs text-slate font-medium mt-3 text-center leading-relaxed">
-                {isPerfect ? "Incredible spatial vision! Absolute alignment." : isGood ? "Great estimation! Outstanding accuracy." : "A bit off center. Keep refining your sight!"}
-              </div>
-            </div>
+            <Btn id="between-next-btn" variant="secondary" onClick={handleNextRound}>Next color</Btn>
           </div>
-        )}
-      </div>
-
-      {/* Footer controls */}
-      <div className="h-16 flex items-center justify-between select-none border-t border-ash mt-6 pt-2">
-        <button 
-          id="between-back-btn"
-          onClick={onBack}
-          className="text-[10px] tracking-widest font-mono font-bold text-smoke hover:text-carbon-black transition-colors cursor-pointer flex items-center gap-1.5 focus:outline-none"
-        >
-          ← EXIT MODULE
-        </button>
-
-        {stage === "reveal" && (
-          <button 
-            id="between-next-btn"
-            onClick={handleNextRound}
-            className="px-6 py-2.5 rounded-lg text-xs font-mono font-black tracking-widest cursor-pointer bg-carbon-black text-paper-white hover:bg-carbon-black/90 active:scale-95 transition-all focus:outline-none"
-          >
-            NEXT ROUND →
-          </button>
         )}
       </div>
     </div>

@@ -3,30 +3,35 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { motion } from "motion/react";
 import { TallyRoundData } from "../../types";
 import { setupTallyRound } from "../../utils/gameLogic";
-import { GetReady } from "../GetReady";
+import { GameHead, Ready, Verdict, Btn, Wobble } from "../ui/Kit";
+import { TallyGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
 interface GameProps {
   accentColor: string;
   onBack: () => void;
+  onPlayed?: () => void;
 }
 
-export const TallyGame: React.FC<GameProps> = ({ accentColor, onBack }) => {
+/* Dots are physical pieces in the four playable primaries */
+const DOT_COLORS = ["#ff4b3e", "#ffc400", "#2d6cf6", "#1fbf66"];
+
+export const TallyGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
   const [stage, setStage] = useState<"getReady" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundNumber, setRoundNumber] = useState<number>(1);
   const [roundData, setRoundData] = useState<TallyRoundData>(() => setupTallyRound(1));
   const [visibleDotsCount, setVisibleDotsCount] = useState<number>(0);
-  const [autoAdvanceTimer, setAutoAdvanceTimer] = useState<number | null>(null);
-  const [countdown, setCountdown] = useState<number>(4);
+  const [countdown, setCountdown] = useState<number>(5);
+  const autoAdvanceTimer = useRef<number | null>(null);
 
-  // Restart/Next Round
   const handleNextRound = () => {
-    if (autoAdvanceTimer) {
-      clearTimeout(autoAdvanceTimer);
-      setAutoAdvanceTimer(null);
+    if (autoAdvanceTimer.current) {
+      clearTimeout(autoAdvanceTimer.current);
+      autoAdvanceTimer.current = null;
     }
     const wasCorrect = roundData.userSelection === roundData.trueCount;
     const nextRound = wasCorrect ? roundNumber + 1 : roundNumber;
@@ -34,17 +39,15 @@ export const TallyGame: React.FC<GameProps> = ({ accentColor, onBack }) => {
     setRoundData(setupTallyRound(nextRound));
     setVisibleDotsCount(0);
     setStage("getReady");
-    setCountdown(4);
+    setCountdown(5);
   };
 
-  // Stimulus timer: Pop circles one by one, scaling speed based on the round/run number
+  /* Pop dots one by one; speed scales with the run level (unchanged logic) */
   useEffect(() => {
     if (stage === "stimulus") {
       setVisibleDotsCount(0);
       let dotsPopped = 0;
       const totalDots = roundData.points.length;
-      
-      // Calculate delay per dot: Round 1 has 250ms delay, getting faster each round
       const popSpeed = Math.max(30, Math.round(250 / (1 + (roundNumber - 1) * 0.45)));
 
       const interval = setInterval(() => {
@@ -54,34 +57,22 @@ export const TallyGame: React.FC<GameProps> = ({ accentColor, onBack }) => {
           playTick();
         } else {
           clearInterval(interval);
-          // Keep all dots displayed for a small holding time before showing options
-          const transitionTimer = setTimeout(() => {
-            setStage("answer");
-          }, 850);
-          return () => clearTimeout(transitionTimer);
+          setTimeout(() => setStage("answer"), 850);
         }
       }, popSpeed);
 
-      return () => {
-        clearInterval(interval);
-      };
+      return () => clearInterval(interval);
     }
   }, [stage, roundNumber, roundData.points.length]);
 
-  // Reveal auto-advance
   useEffect(() => {
     if (stage === "reveal") {
       playRevealInterval();
+      onPlayed?.();
 
-      const interval = setInterval(() => {
-        setCountdown((prev) => Math.max(0, prev - 1));
-      }, 1000);
-
-      const timer = setTimeout(() => {
-        handleNextRound();
-      }, 5000); // 5s reveal
-
-      setAutoAdvanceTimer(timer as any);
+      const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
+      const timer = setTimeout(handleNextRound, 5000);
+      autoAdvanceTimer.current = timer as unknown as number;
 
       return () => {
         clearInterval(interval);
@@ -92,244 +83,142 @@ export const TallyGame: React.FC<GameProps> = ({ accentColor, onBack }) => {
 
   const handleSelectOption = (num: number) => {
     if (stage !== "answer") return;
-
     playTick();
     triggerHaptic();
-
-    setRoundData((prev) => ({
-      ...prev,
-      userSelection: num,
-    }));
+    setRoundData((prev) => ({ ...prev, userSelection: num }));
     setStage("reveal");
   };
 
   const isUserCorrect = roundData.userSelection === roundData.trueCount;
 
-  return (
-    <div id="tally-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto px-2 justify-between min-h-[480px]">
-      
-      {/* Top status bar */}
-      <div className="flex justify-between items-center text-xs tracking-wider text-smoke font-mono select-none mb-6 pb-3 border-b border-ash uppercase">
-        <span className="font-bold">MODULE 06: SPOT COUNTING (RUN #{roundNumber})</span>
-        {stage === "reveal" && (
-          <span className="text-carbon-black font-bold">NEXT IN {countdown}s</span>
-        )}
-        {stage === "stimulus" && (
-          <span className="text-slate font-bold animate-pulse">COUNT THE DOTS QUICKLY!</span>
-        )}
-        {stage === "answer" && (
-          <span className="text-carbon-black font-bold">HOW MANY DOTS DID YOU SEE?</span>
-        )}
-      </div>
+  const status =
+    stage === "stimulus" ? "Count them" :
+    stage === "answer" ? "How many?" :
+    stage === "reveal" ? `Next in ${countdown}s` :
+    `Run ${String(roundNumber).padStart(2, "0")}`;
 
-      {/* Main board */}
-      <div className="flex-1 flex flex-col justify-center py-4">
+  const board = (size: string, dotScale: number, animated: boolean) => (
+    <div
+      id={animated ? "tally-scatter-container" : "tally-reveal-scatter"}
+      className={`${size} bg-wash border-[1.5px] border-line rounded-3xl relative overflow-hidden`}
+    >
+      {roundData.points.map((pt, idx) => {
+        const visible = !animated || idx < visibleDotsCount;
+        const color = DOT_COLORS[idx % DOT_COLORS.length];
+        return animated ? (
+          /* Pieces drop, bounce once, settle */
+          <motion.div
+            key={idx}
+            id={`tally-circle-${idx}`}
+            initial={false}
+            animate={visible ? { y: 0, scale: 1, opacity: 1 } : { y: -34, scale: 0.4, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 640, damping: 17 }}
+            className="absolute rounded-full"
+            style={{
+              left: `${pt.x}%`,
+              top: `${pt.y}%`,
+              width: `${pt.r * 2.6}px`,
+              height: `${pt.r * 2.6}px`,
+              marginLeft: `${-pt.r * 1.3}px`,
+              marginTop: `${-pt.r * 1.3}px`,
+              backgroundColor: color,
+            }}
+          />
+        ) : (
+          <div
+            key={idx}
+            id={`tally-reveal-circle-${idx}`}
+            className="absolute rounded-full"
+            style={{
+              left: `${pt.x}%`,
+              top: `${pt.y}%`,
+              width: `${pt.r * dotScale}px`,
+              height: `${pt.r * dotScale}px`,
+              transform: "translate(-50%, -50%)",
+              backgroundColor: color,
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <div id="tally-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
+      <GameHead title="Count the Dots" status={status} onBack={onBack} />
+
+      <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
-          <GetReady 
-            name="Count the Dots" 
-            instructions="A quick group of dots will flash on the screen. Count them as fast as you can, then pick the correct number from the dials." 
-            accentColor={accentColor} 
-            onComplete={() => setStage("stimulus")} 
+          <Ready
+            name="Count the Dots"
+            instructions={
+              roundNumber === 1
+                ? "Pieces drop onto the board one by one. Count them as they land, then answer. Every correct run makes them faster and more numerous."
+                : `Run ${roundNumber} — faster and busier. Keep counting.`
+            }
+            glyph={<span className="scale-150 inline-block"><TallyGlyph /></span>}
+            onComplete={() => setStage("stimulus")}
           />
         )}
 
         {stage === "stimulus" && (
-          <div className="flex flex-col items-center">
-            {/* Flat circular scope representing a focus scanner */}
-            <div className="p-4 bg-paper-white border border-ash/40 rounded-full">
-              <div 
-                id="tally-scatter-container"
-                className="w-64 h-64 md:w-72 md:h-72 border border-ash bg-mist-gray relative overflow-hidden rounded-full"
-              >
-                {/* Sonar sweep lines */}
-                <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-ash/40" />
-                <div className="absolute left-1/2 top-0 bottom-0 w-[1px] bg-ash/40" />
-                
-                {roundData.points.map((pt, idx) => {
-                  const isVisible = idx < visibleDotsCount;
-                  return (
-                    <div
-                      key={idx}
-                      id={`tally-circle-${idx}`}
-                      className="absolute rounded-full bg-carbon-black transition-all duration-200 ease-out"
-                      style={{
-                        left: `${pt.x}%`,
-                        top: `${pt.y}%`,
-                        width: `${pt.r * 2}px`,
-                        height: `${pt.r * 2}px`,
-                        transform: `translate(-50%, -50%) scale(${isVisible ? 1 : 0})`,
-                        opacity: isVisible ? 1 : 0,
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Amber beacon */}
-            <div className="flex items-center gap-2 mt-6">
-              <span className="w-2.5 h-2.5 rounded-full bg-voltage-yellow border border-carbon-black" />
-              <span className="text-[10px] font-mono tracking-widest text-smoke uppercase font-bold">
-                EMISSION COMPLETED
-              </span>
-            </div>
+          <div className="flex flex-col items-center gap-6">
+            <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-mut tabular-nums">
+              Count the pieces
+            </span>
+            {board("w-72 h-72 sm:w-80 sm:h-80", 2.6, true)}
           </div>
         )}
 
         {stage === "answer" && (
-          <div className="flex flex-col items-center w-full">
-            {/* Empty board as placeholder */}
-            <div className="p-4 bg-paper-white border border-ash/40 rounded-full mb-8">
-              <div 
-                id="tally-empty-container"
-                className="w-48 h-48 rounded-full border border-dashed border-ash bg-transparent flex items-center justify-center"
-              >
-                <span className="text-[10px] font-mono tracking-widest text-smoke uppercase font-bold text-center max-w-[120px] leading-relaxed">
-                  DOTS HIDDEN<br/>CHOOSE COUNT
-                </span>
-              </div>
-            </div>
-
-            {/* Answers grid of push buttons */}
-            <div className="p-6 bg-paper-white rounded-[32px] border border-ash/40 w-full max-w-sm">
-              <div className="grid grid-cols-4 gap-4 select-none">
-                {roundData.options.map((opt) => (
-                  <button
-                    key={opt}
-                    id={`tally-option-${opt}`}
-                    onClick={() => handleSelectOption(opt)}
-                    className="py-3.5 rounded-xl bg-paper-white text-carbon-black font-mono text-lg font-extrabold tracking-wider border border-ash hover:bg-mist-gray/40 active:scale-95 transition-all cursor-pointer focus:outline-none flex items-center justify-center"
-                  >
-                    {opt}
-                  </button>
-                ))}
-              </div>
+          <div className="flex flex-col items-center gap-8">
+            <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-ink">
+              How many pieces landed?
+            </span>
+            <div className="grid grid-cols-4 gap-3 w-full max-w-sm">
+              {roundData.options.map((opt, i) => (
+                <motion.button
+                  key={opt}
+                  id={`tally-option-${opt}`}
+                  onClick={() => handleSelectOption(opt)}
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.05, type: "spring", stiffness: 380, damping: 21 }}
+                  className="btn-press !rounded-2xl bg-paper font-mono font-extrabold text-xl py-4 tabular-nums cursor-pointer"
+                >
+                  {opt}
+                </motion.button>
+              ))}
             </div>
           </div>
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center w-full select-none animate-fade-in">
-            {/* Show scatter board to verify count */}
-            <div className="p-4 bg-paper-white border border-ash/40 rounded-full mb-6">
-              <div 
-                id="tally-reveal-scatter"
-                className="w-48 h-48 border border-ash bg-mist-gray relative overflow-hidden rounded-full"
-              >
-                {roundData.points.map((pt, idx) => (
-                  <div
-                    key={idx}
-                    id={`tally-reveal-circle-${idx}`}
-                    className="absolute rounded-full bg-carbon-black"
-                    style={{
-                      left: `${pt.x}%`,
-                      top: `${pt.y}%`,
-                      width: `${pt.r * 1.8}px`,
-                      height: `${pt.r * 1.8}px`,
-                      transform: "translate(-50%, -50%)",
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
+          <div className="flex flex-col items-center gap-8">
+            <Wobble active={!isUserCorrect}>{board("w-52 h-52", 2.1, false)}</Wobble>
 
-            {/* Binary outcome panel */}
-            <div className="w-full max-w-sm p-6 mb-6 rounded-[32px] border border-ash/40 bg-paper-white flex flex-col items-center text-center">
-              
-              {/* LED lamps */}
-              <div className="flex justify-center gap-12 mb-4">
-                <div className="flex flex-col items-center gap-1.5">
-                  <div 
-                    className={`w-6 h-6 rounded-full transition-all duration-300 ${
-                      isUserCorrect 
-                        ? "bg-mint-chip border-2 border-carbon-black" 
-                        : "bg-mist-gray border border-ash"
-                    }`}
-                  />
-                  <span className="text-[9px] tracking-widest text-smoke font-mono font-bold">MATCH</span>
-                </div>
+            <Verdict
+              id="tally-reveal-verdict"
+              ok={isUserCorrect}
+              headline={
+                isUserCorrect
+                  ? "Exact count."
+                  : `Off by ${Math.abs((roundData.userSelection ?? 0) - roundData.trueCount)}.`
+              }
+              detail={
+                isUserCorrect
+                  ? `${roundData.trueCount} pieces — your counting radar is calibrated. Next run gets faster.`
+                  : `There were ${roundData.trueCount}. The speed stays put until you nail it.`
+              }
+              score={String(roundData.trueCount)}
+              scoreCaption="True count"
+              nextIn={countdown}
+            />
 
-                <div className="flex flex-col items-center gap-1.5">
-                  <div 
-                    className={`w-6 h-6 rounded-full transition-all duration-300 ${
-                      !isUserCorrect 
-                        ? "bg-carbon-black border-2 border-carbon-black" 
-                        : "bg-mist-gray border border-ash"
-                    }`}
-                  />
-                  <span className="text-[9px] tracking-widest text-smoke font-mono font-bold">ERROR</span>
-                </div>
-              </div>
-
-              {/* Simple outcome text */}
-              <h3 className="text-2xl font-extrabold tracking-tight font-display text-carbon-black uppercase leading-none mb-2">
-                {isUserCorrect ? "Exact Count Match!" : `Miscounted by ${Math.abs(roundData.userSelection - roundData.trueCount)}`}
-              </h3>
-              <p className="text-xs text-smoke font-mono uppercase tracking-wider">
-                {isUserCorrect ? "Your subitizing radar is calibrated." : `There were exactly ${roundData.trueCount} dots.`}
-              </p>
-            </div>
-
-            {/* Interactive button layout showing choice and real counts */}
-            <div className="p-6 bg-paper-white rounded-[32px] border border-ash/40 w-full max-w-sm">
-              <div className="grid grid-cols-4 gap-4 select-none">
-                {roundData.options.map((opt) => {
-                  const isTrue = opt === roundData.trueCount;
-                  const isSelected = opt === roundData.userSelection;
-
-                  let borderStyle = "border-ash text-smoke bg-paper-white opacity-50";
-
-                  if (isTrue) {
-                    borderStyle = "border-carbon-black border-2 scale-105 bg-voltage-yellow text-carbon-black z-10 font-extrabold";
-                  } else if (isSelected) {
-                    borderStyle = "border-smoke border-2 scale-95 bg-paper-white text-carbon-black font-extrabold";
-                  }
-
-                  return (
-                    <div
-                      key={opt}
-                      id={`tally-reveal-option-${opt}`}
-                      className={`py-3 rounded-xl border font-mono text-base flex flex-col items-center justify-center relative ${borderStyle}`}
-                    >
-                      <span>{opt}</span>
-                      {isTrue && (
-                        <span className="text-[7px] tracking-tight uppercase absolute -bottom-3.5 font-mono text-center w-full font-black text-carbon-black">
-                          TRUE
-                        </span>
-                      )}
-                      {isSelected && !isTrue && (
-                        <span className="text-[7px] tracking-tight uppercase absolute -bottom-3.5 font-mono text-center w-full font-black text-smoke">
-                          YOU
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
+            <Btn id="tally-next-btn" variant="secondary" onClick={handleNextRound}>
+              {isUserCorrect ? "Next run" : "Try again"}
+            </Btn>
           </div>
-        )}
-      </div>
-
-      {/* Footer controls */}
-      <div className="h-16 flex items-center justify-between select-none border-t border-ash mt-6 pt-2">
-        <button 
-          id="tally-back-btn"
-          onClick={onBack}
-          className="text-[10px] tracking-widest font-mono font-bold text-smoke hover:text-carbon-black transition-colors cursor-pointer flex items-center gap-1.5 focus:outline-none"
-        >
-          ← EXIT MODULE
-        </button>
-
-        {stage === "reveal" && (
-          <button 
-            id="tally-next-btn"
-            onClick={handleNextRound}
-            className="px-6 py-2.5 rounded-lg text-xs font-mono font-black tracking-widest cursor-pointer bg-carbon-black text-paper-white hover:bg-carbon-black/90 active:scale-95 transition-all focus:outline-none"
-          >
-            NEXT ROUND →
-          </button>
         )}
       </div>
     </div>
