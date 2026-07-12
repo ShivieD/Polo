@@ -79,11 +79,73 @@ export function computeDeltaE(lab1: [number, number, number], lab2: [number, num
   return Math.sqrt(dL * dL + da * da + db * db);
 }
 
+/* CIEDE2000 — unlike the plain Lab distance, this weights lightness, chroma
+   and hue by how visible the difference actually is to the eye, so the same
+   perceived gap scores the same regardless of which hue you're in. */
+export function computeDeltaE2000(
+  [L1, a1, b1]: [number, number, number],
+  [L2, a2, b2]: [number, number, number]
+): number {
+  const rad = Math.PI / 180;
+  const deg = 180 / Math.PI;
+  const C1 = Math.hypot(a1, b1);
+  const C2 = Math.hypot(a2, b2);
+  const Cbar = (C1 + C2) / 2;
+  const G = 0.5 * (1 - Math.sqrt(Math.pow(Cbar, 7) / (Math.pow(Cbar, 7) + Math.pow(25, 7))));
+  const a1p = (1 + G) * a1;
+  const a2p = (1 + G) * a2;
+  const C1p = Math.hypot(a1p, b1);
+  const C2p = Math.hypot(a2p, b2);
+  const h1p = C1p === 0 ? 0 : (Math.atan2(b1, a1p) * deg + 360) % 360;
+  const h2p = C2p === 0 ? 0 : (Math.atan2(b2, a2p) * deg + 360) % 360;
+
+  const dLp = L2 - L1;
+  const dCp = C2p - C1p;
+  let dhp = 0;
+  if (C1p * C2p !== 0) {
+    dhp = h2p - h1p;
+    if (dhp > 180) dhp -= 360;
+    else if (dhp < -180) dhp += 360;
+  }
+  const dHp = 2 * Math.sqrt(C1p * C2p) * Math.sin((dhp / 2) * rad);
+
+  const Lbarp = (L1 + L2) / 2;
+  const Cbarp = (C1p + C2p) / 2;
+  let hbarp: number;
+  if (C1p * C2p === 0) hbarp = h1p + h2p;
+  else if (Math.abs(h1p - h2p) <= 180) hbarp = (h1p + h2p) / 2;
+  else hbarp = h1p + h2p < 360 ? (h1p + h2p + 360) / 2 : (h1p + h2p - 360) / 2;
+
+  const T =
+    1 -
+    0.17 * Math.cos((hbarp - 30) * rad) +
+    0.24 * Math.cos(2 * hbarp * rad) +
+    0.32 * Math.cos((3 * hbarp + 6) * rad) -
+    0.2 * Math.cos((4 * hbarp - 63) * rad);
+  const dTheta = 30 * Math.exp(-Math.pow((hbarp - 275) / 25, 2));
+  const RC = 2 * Math.sqrt(Math.pow(Cbarp, 7) / (Math.pow(Cbarp, 7) + Math.pow(25, 7)));
+  const SL = 1 + (0.015 * Math.pow(Lbarp - 50, 2)) / Math.sqrt(20 + Math.pow(Lbarp - 50, 2));
+  const SC = 1 + 0.045 * Cbarp;
+  const SH = 1 + 0.015 * Cbarp * T;
+  const RT = -Math.sin(2 * dTheta * rad) * RC;
+
+  return Math.sqrt(
+    Math.pow(dLp / SL, 2) +
+      Math.pow(dCp / SC, 2) +
+      Math.pow(dHp / SH, 2) +
+      RT * (dCp / SC) * (dHp / SH)
+  );
+}
+
+/* Differences under one deltaE2000 unit are invisible to the eye — that's a
+   perfect 100. Beyond that the score falls 2.5 points per unit of visible
+   difference, hitting 0 around "unmistakably different". */
 export function getScoreForColors(color1: HSL, color2: HSL): number {
   const lab1 = hslToLab(color1.h, color1.s, color1.l);
   const lab2 = hslToLab(color2.h, color2.s, color2.l);
-  const deltaE = computeDeltaE(lab1, lab2);
-  return Math.round(Math.max(0, 100 - deltaE * 2.0));
+  const deltaE = computeDeltaE2000(lab1, lab2);
+  if (deltaE <= 1) return 100;
+  return Math.round(Math.max(0, Math.min(100, 100 - 2.5 * (deltaE - 1))));
 }
 
 // Generate random aesthetic colors
@@ -119,8 +181,9 @@ export function generateSwatchOptions(correctColor: HSL): { color: HSL; isCorrec
       };
       
       // Compute score difference to make sure they are not exactly the same or too far
+      // (band recalibrated for the CIEDE2000-based score)
       const score = getScoreForColors(correctColor, distractor);
-      if (score >= 70 && score <= 92) {
+      if (score >= 75 && score <= 96) {
         tooClose = false;
       }
     }

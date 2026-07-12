@@ -5,50 +5,98 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
-import { TallyRoundData } from "../../types";
+import { TallyRoundData, TallyMode, TallyShape } from "../../types";
 import { setupTallyRound } from "../../utils/gameLogic";
-import { GameHead, Ready, Verdict, Btn, Wobble } from "../ui/Kit";
+import { GameHead, Ready, Verdict, Btn, Wobble, Countdown } from "../ui/Kit";
 import { TallyGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
 interface GameProps {
   accentColor: string;
   onBack: () => void;
-  onPlayed?: () => void;
+  onResult?: (correct: boolean) => void;
+  streak?: number;
 }
 
 /* Dots are physical pieces in the four playable primaries */
 const DOT_COLORS = ["#ff4b3e", "#ffc400", "#2d6cf6", "#1fbf66"];
 
-export const TallyGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
+const UNLOCK_KEY = "polo-tally-shapes-unlocked";
+const UNLOCK_AT = 20; // correctly count a board of 20+ to unlock shapes mode
+
+/* A piece is a circle, a square, or a triangle in one of the primaries */
+const PieceShape: React.FC<{ shape?: TallyShape; color: string }> = ({ shape, color }) =>
+  shape === "triangle" ? (
+    <svg viewBox="0 0 100 100" className="w-full h-full block" aria-hidden="true">
+      <polygon points="50,6 96,92 4,92" fill={color} />
+    </svg>
+  ) : (
+    <div
+      className={`w-full h-full ${shape === "square" ? "rounded-[22%]" : "rounded-full"}`}
+      style={{ backgroundColor: color }}
+    />
+  );
+
+export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const [stage, setStage] = useState<"getReady" | "stimulus" | "answer" | "reveal">("getReady");
-  const [roundNumber, setRoundNumber] = useState<number>(1);
-  const [roundData, setRoundData] = useState<TallyRoundData>(() => setupTallyRound(1));
+  const [mode, setMode] = useState<TallyMode>("dots");
+  const [shapesUnlocked, setShapesUnlocked] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(UNLOCK_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [justUnlocked, setJustUnlocked] = useState(false);
+  const [dotsRun, setDotsRun] = useState<number>(1);
+  const [shapesRun, setShapesRun] = useState<number>(1);
+  const [counting, setCounting] = useState(false); // countdown inside the mode picker
+  const [roundData, setRoundData] = useState<TallyRoundData>(() => setupTallyRound(1, "dots"));
   const [visibleDotsCount, setVisibleDotsCount] = useState<number>(0);
   const [countdown, setCountdown] = useState<number>(5);
   const autoAdvanceTimer = useRef<number | null>(null);
+
+  const runForMode = (m: TallyMode) => (m === "dots" ? dotsRun : shapesRun);
+  const roundNumber = runForMode(mode);
+  const isUserCorrect = roundData.userSelection === roundData.trueCount;
 
   const handleNextRound = () => {
     if (autoAdvanceTimer.current) {
       clearTimeout(autoAdvanceTimer.current);
       autoAdvanceTimer.current = null;
     }
-    const wasCorrect = roundData.userSelection === roundData.trueCount;
-    const nextRound = wasCorrect ? roundNumber + 1 : roundNumber;
-    setRoundNumber(nextRound);
-    setRoundData(setupTallyRound(nextRound));
+    let nextRun = roundNumber;
+    if (isUserCorrect) {
+      nextRun = roundNumber + 1;
+      if (mode === "dots") setDotsRun(nextRun);
+      else setShapesRun(nextRun);
+    }
+    setRoundData(setupTallyRound(nextRun, mode));
     setVisibleDotsCount(0);
+    setJustUnlocked(false);
     setStage("getReady");
     setCountdown(5);
   };
 
-  /* Pop dots one by one; speed scales with the run level (unchanged logic) */
+  /* Called from the mode picker — regenerate the round for the chosen mode */
+  const startRun = (chosen: TallyMode) => {
+    setMode(chosen);
+    setRoundData(setupTallyRound(runForMode(chosen), chosen));
+    setVisibleDotsCount(0);
+    setCounting(true);
+  };
+
+  /* Pop pieces one by one. Dots mode speeds up with the run level;
+     shapes mode keeps a steady tempo — the mix is the challenge. */
   useEffect(() => {
     if (stage === "stimulus") {
       setVisibleDotsCount(0);
       let dotsPopped = 0;
       const totalDots = roundData.points.length;
-      const popSpeed = Math.max(30, Math.round(250 / (1 + (roundNumber - 1) * 0.45)));
+      const popSpeed =
+        roundData.mode === "shapes"
+          ? 150
+          : Math.max(30, Math.round(250 / (1 + (roundNumber - 1) * 0.45)));
 
       const interval = setInterval(() => {
         if (dotsPopped < totalDots) {
@@ -63,12 +111,23 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
 
       return () => clearInterval(interval);
     }
-  }, [stage, roundNumber, roundData.points.length]);
+  }, [stage, roundNumber, roundData.points.length, roundData.mode]);
 
   useEffect(() => {
     if (stage === "reveal") {
       playRevealInterval();
-      onPlayed?.();
+      onResult?.(isUserCorrect);
+
+      /* Nailing a 20+ board unlocks shape counting */
+      if (isUserCorrect && roundData.mode === "dots" && roundData.trueCount >= UNLOCK_AT && !shapesUnlocked) {
+        setShapesUnlocked(true);
+        setJustUnlocked(true);
+        try {
+          localStorage.setItem(UNLOCK_KEY, "1");
+        } catch {
+          /* storage unavailable — unlock stays session-only */
+        }
+      }
 
       const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
       const timer = setTimeout(handleNextRound, 5000);
@@ -89,7 +148,7 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
     setStage("reveal");
   };
 
-  const isUserCorrect = roundData.userSelection === roundData.trueCount;
+  const targetLabel = roundData.targetShape ? `${roundData.targetShape}s` : "pieces";
 
   const status =
     stage === "stimulus" ? "Count them" :
@@ -105,6 +164,7 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
       {roundData.points.map((pt, idx) => {
         const visible = !animated || idx < visibleDotsCount;
         const color = DOT_COLORS[idx % DOT_COLORS.length];
+        const px = pt.r * (animated ? 2.6 : dotScale);
         return animated ? (
           /* Pieces drop, bounce once, settle */
           <motion.div
@@ -113,58 +173,132 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
             initial={false}
             animate={visible ? { y: 0, scale: 1, opacity: 1 } : { y: -34, scale: 0.4, opacity: 0 }}
             transition={{ type: "spring", stiffness: 640, damping: 17 }}
-            className="absolute rounded-full"
+            className="absolute"
             style={{
               left: `${pt.x}%`,
               top: `${pt.y}%`,
-              width: `${pt.r * 2.6}px`,
-              height: `${pt.r * 2.6}px`,
-              marginLeft: `${-pt.r * 1.3}px`,
-              marginTop: `${-pt.r * 1.3}px`,
-              backgroundColor: color,
+              width: `${px}px`,
+              height: `${px}px`,
+              marginLeft: `${-px / 2}px`,
+              marginTop: `${-px / 2}px`,
             }}
-          />
+          >
+            <PieceShape shape={pt.shape} color={color} />
+          </motion.div>
         ) : (
           <div
             key={idx}
             id={`tally-reveal-circle-${idx}`}
-            className="absolute rounded-full"
+            className="absolute"
             style={{
               left: `${pt.x}%`,
               top: `${pt.y}%`,
-              width: `${pt.r * dotScale}px`,
-              height: `${pt.r * dotScale}px`,
+              width: `${px}px`,
+              height: `${px}px`,
               transform: "translate(-50%, -50%)",
-              backgroundColor: color,
             }}
-          />
+          >
+            <PieceShape shape={pt.shape} color={color} />
+          </div>
         );
       })}
     </div>
   );
 
+  /* Mode picker — appears once shape counting is unlocked */
+  const modePicker = counting ? (
+    <Countdown
+      onComplete={() => {
+        setCounting(false);
+        setStage("stimulus");
+      }}
+    />
+  ) : (
+    <motion.div
+      id="tally-mode-picker"
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 320, damping: 26 }}
+      className="flex flex-col items-center text-center max-w-md mx-auto py-8 select-none"
+    >
+      <div className="mb-7 flex justify-center"><span className="scale-150 inline-block"><TallyGlyph /></span></div>
+      <h2 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-ink mb-3">Count the Dots</h2>
+      <p className="text-[16px] text-mut leading-relaxed mb-7">Pick your challenge for this run.</p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full mb-9">
+        <button
+          id="tally-mode-dots"
+          onClick={() => { playTick(); triggerHaptic(); setMode("dots"); }}
+          className={`text-left rounded-2xl border-2 p-5 cursor-pointer transition-colors ${
+            mode === "dots" ? "border-ink bg-wash" : "border-line bg-paper hover:border-mut"
+          }`}
+          aria-pressed={mode === "dots"}
+        >
+          <span className="font-display font-extrabold text-[16px] text-ink block mb-1.5">Dots</span>
+          <span className="text-[14px] text-mut leading-relaxed block">
+            One kind of piece. More of them, faster, every run.
+          </span>
+        </button>
+        <button
+          id="tally-mode-shapes"
+          onClick={() => { playTick(); triggerHaptic(); setMode("shapes"); }}
+          className={`text-left rounded-2xl border-2 p-5 cursor-pointer transition-colors ${
+            mode === "shapes" ? "border-ink bg-wash" : "border-line bg-paper hover:border-mut"
+          }`}
+          aria-pressed={mode === "shapes"}
+        >
+          <span className="font-display font-extrabold text-[16px] text-ink block mb-1.5">Shapes</span>
+          <span className="text-[14px] text-mut leading-relaxed block">
+            Circles, squares & triangles mixed — count just one kind.
+          </span>
+        </button>
+      </div>
+
+      <Btn id="tally-start-btn" onClick={() => startRun(mode)}>Start run</Btn>
+    </motion.div>
+  );
+
   return (
     <div id="tally-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Count the Dots" status={status} onBack={onBack} />
+      <GameHead title="Count the Dots" status={status} onBack={onBack} streak={streak} />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
-          <Ready
-            name="Count the Dots"
-            instructions={
-              roundNumber === 1
-                ? "Pieces drop onto the board one by one. Count them as they land, then answer. Every correct run makes them faster and more numerous."
-                : `Run ${roundNumber} — faster and busier. Keep counting.`
-            }
-            glyph={<span className="scale-150 inline-block"><TallyGlyph /></span>}
-            onComplete={() => setStage("stimulus")}
-          />
+          shapesUnlocked ? (
+            modePicker
+          ) : (
+            <Ready
+              name="Count the Dots"
+              steps={
+                dotsRun === 1
+                  ? [
+                      "Pieces drop onto the board one by one.",
+                      "Count them as they land.",
+                      "Pick how many landed — correct runs get faster and busier.",
+                      `Conquer a board of ${UNLOCK_AT}+ to unlock shape counting.`,
+                    ]
+                  : [
+                      `Run ${dotsRun} — faster and busier. Keep counting.`,
+                      `Conquer a board of ${UNLOCK_AT}+ to unlock shape counting.`,
+                    ]
+              }
+              glyph={<span className="scale-150 inline-block"><TallyGlyph /></span>}
+              onComplete={() => setStage("stimulus")}
+            />
+          )
         )}
 
         {stage === "stimulus" && (
           <div className="flex flex-col items-center gap-6">
-            <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-mut tabular-nums">
-              Count the pieces
+            <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-mut tabular-nums flex items-center gap-2">
+              {roundData.mode === "shapes" ? (
+                <>
+                  Count only the {targetLabel}
+                  <span className="w-4 h-4 inline-block"><PieceShape shape={roundData.targetShape} color="#111116" /></span>
+                </>
+              ) : (
+                "Count the pieces"
+              )}
             </span>
             {board("w-72 h-72 sm:w-80 sm:h-80", 2.6, true)}
           </div>
@@ -172,8 +306,11 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
 
         {stage === "answer" && (
           <div className="flex flex-col items-center gap-8">
-            <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-ink">
-              How many pieces landed?
+            <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-ink flex items-center gap-2">
+              How many {targetLabel} landed?
+              {roundData.mode === "shapes" && (
+                <span className="w-4 h-4 inline-block"><PieceShape shape={roundData.targetShape} color="#111116" /></span>
+              )}
             </span>
             <div className="grid grid-cols-4 gap-3 w-full max-w-sm">
               {roundData.options.map((opt, i) => (
@@ -206,12 +343,18 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
                   : `Off by ${Math.abs((roundData.userSelection ?? 0) - roundData.trueCount)}.`
               }
               detail={
-                isUserCorrect
-                  ? `${roundData.trueCount} pieces — your counting radar is calibrated. Next run gets faster.`
-                  : `There were ${roundData.trueCount}. The speed stays put until you nail it.`
+                justUnlocked
+                  ? `You conquered a ${roundData.trueCount}-piece board — Shapes mode is now unlocked. Pick it on the next round screen.`
+                  : isUserCorrect
+                    ? roundData.mode === "shapes"
+                      ? `${roundData.trueCount} ${targetLabel} — sharp filtering. Next run mixes in more pieces.`
+                      : `${roundData.trueCount} pieces — your counting radar is calibrated. Next run gets faster.`
+                    : roundData.mode === "shapes"
+                      ? `There were ${roundData.trueCount} ${targetLabel}. The mix stays put until you nail it.`
+                      : `There were ${roundData.trueCount}. The speed stays put until you nail it.`
               }
               score={String(roundData.trueCount)}
-              scoreCaption="True count"
+              scoreCaption={roundData.mode === "shapes" ? `True ${targetLabel}` : "True count"}
               nextIn={countdown}
             />
 

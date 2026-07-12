@@ -8,9 +8,12 @@ import {
   SwatchRoundData,
   MixRoundData,
   EchoRoundData,
+  EchoParams,
   BetweenRoundData,
   ShiftRoundData,
   TallyRoundData,
+  TallyMode,
+  TallyShape,
 } from "../types";
 
 export function setupSwatchRound(): SwatchRoundData {
@@ -44,19 +47,55 @@ export function setupMixRound(): MixRoundData {
   };
 }
 
-export function setupEchoRound(): EchoRoundData {
-  // 4 distinct cohesive colors
+/* Difficulty ladder for Repeat the Pattern. The level is the player's
+   current streak of correct answers; each rung pulls one lever:
+   - levels 0-4:  playback speeds up, 600ms → 320ms per flash (the cap)
+   - levels 5-9:  the board grows, 5 → 9 pads, sequence = every pad once
+   - levels 10+:  repeats unlock — the sequence outgrows the board (10, 11, …)
+   - levels 14+:  the board grows again, up to 12 pads, sequence keeps growing */
+export function getEchoParams(level: number): EchoParams {
+  const speeds = [600, 530, 460, 390, 320];
+  const speed = speeds[Math.min(level, speeds.length - 1)];
+
+  let boxes = 4;
+  let seqLen = 4;
+  let allowRepeat = false;
+
+  if (level >= 5) {
+    boxes = Math.min(9, 4 + (level - 4));
+    seqLen = boxes;
+  }
+  if (level >= 10) {
+    allowRepeat = true;
+    boxes = 9;
+    seqLen = 9 + (level - 9);
+  }
+  if (level >= 14) {
+    boxes = Math.min(12, 9 + (level - 13));
+  }
+
+  return { boxes, seqLen, speed, allowRepeat };
+}
+
+export function setupEchoRound(params: EchoParams = getEchoParams(0)): EchoRoundData {
+  const { boxes, seqLen, allowRepeat } = params;
+
+  // Distinct cohesive colors, hues spread evenly around the wheel
   const baseHue = Math.floor(Math.random() * 360);
-  const squares = [0, 1, 2, 3].map((id) => {
-    // Spaced out hues (e.g. analogous or complementary color scheme)
-    const h = (baseHue + id * 45) % 360;
+  const squares = Array.from({ length: boxes }, (_, id) => {
+    const h = (baseHue + Math.round(id * (360 / boxes))) % 360;
     const s = 65 + Math.floor(Math.random() * 15);
     const l = 45 + Math.floor(Math.random() * 15);
     return { id, color: { h, s, l } };
   });
 
-  // Random permutation of 0, 1, 2, 3
-  const sequence = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+  let sequence: number[];
+  if (allowRepeat) {
+    sequence = Array.from({ length: seqLen }, () => Math.floor(Math.random() * boxes));
+  } else {
+    // Random permutation of all pads
+    sequence = Array.from({ length: boxes }, (_, i) => i).sort(() => Math.random() - 0.5).slice(0, seqLen);
+  }
 
   return {
     squares,
@@ -144,16 +183,70 @@ export function setupShiftRound(): ShiftRoundData {
   };
 }
 
-export function setupTallyRound(roundNumber: number = 1): TallyRoundData {
-  // Start with smaller quantity, ramp it up in consecutive runs
+/* Scatter non-overlapping points inside 15-85 percentage bounds */
+function scatterPoints(count: number): { x: number; y: number; r: number }[] {
+  const points: { x: number; y: number; r: number }[] = [];
+  let attempts = 0;
+  while (points.length < count && attempts < 300) {
+    attempts++;
+    const x = Math.random() * 70 + 15;
+    const y = Math.random() * 70 + 15;
+    const r = Math.random() * 1.5 + 4; // 4 to 5.5px dot sizes
+
+    let tooClose = false;
+    for (const p of points) {
+      const dist = Math.hypot(p.x - x, p.y - y);
+      if (dist < 12) { // Spacing collision radius
+        tooClose = true;
+        break;
+      }
+    }
+    if (!tooClose) {
+      points.push({ x, y, r });
+    }
+  }
+  return points;
+}
+
+/* 4 answer options: the true count plus 3 near neighbors */
+function tallyOptions(trueCount: number): number[] {
+  const optionsSet = new Set<number>([trueCount]);
+  let offsetAttempts = 0;
+  while (optionsSet.size < 4 && offsetAttempts < 50) {
+    offsetAttempts++;
+    const offset = (Math.random() > 0.5 ? 1 : -1) * (Math.floor(Math.random() * 3) + 1); // offset of 1, 2, or 3
+    const opt = trueCount + offset;
+    if (opt >= 1 && opt <= 30) {
+      optionsSet.add(opt);
+    }
+  }
+
+  // Fallback if set didn't fill
+  if (optionsSet.size < 4) {
+    optionsSet.add(trueCount + 1);
+    optionsSet.add(trueCount + 2);
+    optionsSet.add(Math.max(1, trueCount - 1));
+  }
+
+  return Array.from(optionsSet).sort((a, b) => a - b);
+}
+
+const TALLY_SHAPES: TallyShape[] = ["circle", "square", "triangle"];
+
+export function setupTallyRound(roundNumber: number = 1, mode: TallyMode = "dots"): TallyRoundData {
+  if (mode === "shapes") {
+    return setupTallyShapesRound(roundNumber);
+  }
+
+  // Dots mode — quantity and speed ramp with consecutive correct runs
   // Round 1: 5 - 7 dots
   // Round 2: 7 - 10 dots
   // Round 3: 10 - 13 dots
   // Round 4: 13 - 16 dots
-  // Round 5+: 16 - 22 dots
+  // Round 5+: 16 - 24 dots
   let minCount = 5;
   let maxCount = 7;
-  
+
   if (roundNumber === 2) {
     minCount = 7;
     maxCount = 10;
@@ -169,57 +262,39 @@ export function setupTallyRound(roundNumber: number = 1): TallyRoundData {
   }
 
   const trueCount = Math.floor(Math.random() * (maxCount - minCount + 1)) + minCount;
-  const points: { x: number; y: number; r: number }[] = [];
-  
-  // Spawn circles inside 15-85 percentage bounds so they stay nicely framed
-  let attempts = 0;
-  while (points.length < trueCount && attempts < 150) {
-    attempts++;
-    const x = Math.random() * 70 + 15;
-    const y = Math.random() * 70 + 15;
-    const r = Math.random() * 1.5 + 4; // 4 to 5.5px dot sizes
-    
-    // Check collision
-    let tooClose = false;
-    for (const p of points) {
-      const dist = Math.hypot(p.x - x, p.y - y);
-      if (dist < 12) { // Spacing collision radius
-        tooClose = true;
-        break;
-      }
-    }
-    if (!tooClose) {
-      points.push({ x, y, r });
-    }
-  }
-
-  // Generate options: 4 count options. True count + 3 near neighbors.
-  // E.g. True count = 14, we want 3 other options close by (e.g., 12, 15, 17)
-  const optionsSet = new Set<number>([trueCount]);
-  let offsetAttempts = 0;
-  while (optionsSet.size < 4 && offsetAttempts < 50) {
-    offsetAttempts++;
-    const offset = (Math.random() > 0.5 ? 1 : -1) * (Math.floor(Math.random() * 3) + 1); // offset of 1, 2, or 3
-    const opt = trueCount + offset;
-    if (opt >= 3 && opt <= 30) {
-      optionsSet.add(opt);
-    }
-  }
-
-  // Fallback if set didn't fill
-  if (optionsSet.size < 4) {
-    optionsSet.add(trueCount - 1);
-    optionsSet.add(trueCount + 1);
-    optionsSet.add(trueCount + 2);
-  }
-
-  const options = Array.from(optionsSet).sort((a, b) => a - b);
+  const points = scatterPoints(trueCount);
 
   return {
     points,
     trueCount,
-    options,
+    options: tallyOptions(trueCount),
     userSelection: null,
+    mode: "dots",
+  };
+}
+
+/* Shapes mode — the alternative unlocked after counting 20+ dots. The board
+   mixes circles, squares and triangles and asks for the count of ONE shape.
+   Difficulty grows through quantity, not speed. */
+export function setupTallyShapesRound(roundNumber: number = 1): TallyRoundData {
+  const total = Math.min(26, 11 + (roundNumber - 1) * 3);
+  const bare = scatterPoints(total);
+
+  // Deal shapes out evenly, then shuffle positions so no shape clusters
+  const deck: TallyShape[] = bare.map((_, i) => TALLY_SHAPES[i % TALLY_SHAPES.length]);
+  deck.sort(() => Math.random() - 0.5);
+  const points = bare.map((p, i) => ({ ...p, shape: deck[i] }));
+
+  const targetShape = TALLY_SHAPES[Math.floor(Math.random() * TALLY_SHAPES.length)];
+  const trueCount = points.filter((p) => p.shape === targetShape).length;
+
+  return {
+    points,
+    trueCount,
+    options: tallyOptions(trueCount),
+    userSelection: null,
+    mode: "shapes",
+    targetShape,
   };
 }
 

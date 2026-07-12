@@ -67,13 +67,24 @@ export const GameHead: React.FC<{
   title: string;
   status: string;
   onBack: () => void;
+  streak?: number;
   id?: string;
-}> = ({ title, status, onBack, id }) => (
+}> = ({ title, status, onBack, streak, id }) => (
   <div id={id} className="flex items-center gap-4 flex-wrap mb-8">
     <BackBtn onClick={onBack} />
     <h2 className="font-display font-extrabold text-xl sm:text-2xl tracking-tight text-ink">{title}</h2>
-    <span className="ml-auto font-mono font-extrabold text-[12px] tracking-[0.1em] text-mut uppercase tabular-nums">
-      {status}
+    <span className="ml-auto flex items-center gap-3">
+      {typeof streak === "number" && streak > 0 && (
+        <span
+          id="game-streak-chip"
+          className="font-mono font-extrabold text-[11px] tracking-[0.1em] uppercase bg-play-yellow text-ink rounded-full px-2.5 py-1 tabular-nums"
+        >
+          Streak {streak}
+        </span>
+      )}
+      <span className="font-mono font-extrabold text-[12px] tracking-[0.1em] text-mut uppercase tabular-nums">
+        {status}
+      </span>
     </span>
   </div>
 );
@@ -158,12 +169,28 @@ export const Countdown: React.FC<{ onComplete: () => void; label?: string }> = (
 /* Ready screen — instructions, then Start round → Countdown           */
 /* ------------------------------------------------------------------ */
 
+/* Numbered timeline — circled step numbers joined by a vertical line,
+   with one instruction per step beside it */
+export const StepsTimeline: React.FC<{ steps: string[]; className?: string }> = ({ steps, className = "" }) => (
+  <ol className={`relative flex flex-col gap-6 text-left ${className}`}>
+    {steps.length > 1 && <i aria-hidden="true" className="absolute left-[15px] top-4 bottom-4 w-[2px] bg-line" />}
+    {steps.map((step, i) => (
+      <li key={i} className="relative flex items-start gap-4">
+        <span className="w-8 h-8 shrink-0 rounded-full border-2 border-ink bg-paper font-mono font-extrabold text-[13px] flex items-center justify-center tabular-nums z-10">
+          {i + 1}
+        </span>
+        <span className="text-[16px] text-ink leading-relaxed pt-[3px]">{step}</span>
+      </li>
+    ))}
+  </ol>
+);
+
 export const Ready: React.FC<{
   name: string;
-  instructions: string;
+  steps: string[];
   glyph?: React.ReactNode;
   onComplete: () => void;
-}> = ({ name, instructions, glyph, onComplete }) => {
+}> = ({ name, steps, glyph, onComplete }) => {
   const [counting, setCounting] = useState(false);
 
   if (counting) return <Countdown onComplete={onComplete} />;
@@ -177,8 +204,8 @@ export const Ready: React.FC<{
       className="flex flex-col items-center text-center max-w-md mx-auto py-8 select-none"
     >
       {glyph && <div className="mb-7 flex justify-center">{glyph}</div>}
-      <h2 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-ink mb-4">{name}</h2>
-      <p className="text-[15px] text-mut leading-relaxed max-w-sm mb-9">{instructions}</p>
+      <h2 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-ink mb-7">{name}</h2>
+      <StepsTimeline steps={steps} className="max-w-sm mb-10" />
       <Btn id="get-ready-start-btn" onClick={() => setCounting(true)}>
         Start round
       </Btn>
@@ -207,22 +234,22 @@ export const Verdict: React.FC<{
     className="flex flex-col items-center text-center gap-1"
   >
     <span
-      className={`font-mono font-extrabold text-[10.5px] tracking-[0.16em] uppercase px-3 py-1 rounded-full mb-3 ${
+      className={`font-mono font-extrabold text-[11px] tracking-[0.16em] uppercase px-3.5 py-1.5 rounded-full mb-3 ${
         ok ? "bg-play-green text-paper" : "bg-play-red text-paper"
       }`}
     >
-      {ok ? "Hit" : "Miss"}
+      {ok ? "Correct!" : "Miss"}
     </span>
     {score !== undefined && (
       <div className="font-mono font-extrabold text-6xl leading-none tabular-nums text-ink">{score}</div>
     )}
     {scoreCaption && (
-      <div className="font-mono font-medium text-[10.5px] tracking-[0.16em] uppercase text-mut mt-1">{scoreCaption}</div>
+      <div className="font-mono font-medium text-[11px] tracking-[0.16em] uppercase text-mut mt-1">{scoreCaption}</div>
     )}
-    <h3 className="font-display font-extrabold text-lg sm:text-xl tracking-tight text-ink mt-3">{headline}</h3>
-    <p className="text-[13.5px] text-mut max-w-xs leading-relaxed">{detail}</p>
+    <h3 className="font-display font-extrabold text-xl sm:text-2xl tracking-tight text-ink mt-3">{headline}</h3>
+    <p className="text-[15px] text-mut max-w-sm leading-relaxed mt-1">{detail}</p>
     {nextIn !== undefined && (
-      <span className="font-mono font-medium text-[11px] tracking-[0.14em] uppercase text-mut mt-4 tabular-nums">
+      <span className="font-mono font-medium text-[12px] tracking-[0.14em] uppercase text-mut mt-4 tabular-nums">
         Next round in {nextIn}s
       </span>
     )}

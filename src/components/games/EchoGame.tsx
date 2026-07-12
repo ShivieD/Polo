@@ -6,7 +6,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { EchoRoundData } from "../../types";
-import { setupEchoRound } from "../../utils/gameLogic";
+import { setupEchoRound, getEchoParams } from "../../utils/gameLogic";
 import { hslToCss, HSL } from "../../utils/color";
 import { GameHead, Ready, Verdict, Btn, Wobble } from "../ui/Kit";
 import { EchoGlyph } from "../ui/Glyphs";
@@ -15,27 +15,38 @@ import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 interface GameProps {
   accentColor: string;
   onBack: () => void;
-  onPlayed?: () => void;
+  onResult?: (correct: boolean) => void;
+  streak?: number;
 }
 
 /* A pad rests as a pale tint of its own color and flashes to full color */
 const tint = (c: HSL) => hslToCss({ h: c.h, s: Math.round(c.s * 0.45), l: 91 });
 
-export const EchoGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
+export const EchoGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
+  /* Difficulty level = current streak of correct answers. Each correct
+     round climbs one rung of the ladder (speed → more pads → repeats →
+     even more pads); a miss drops back to the start. */
+  const [level, setLevel] = useState<number>(() => streak ?? 0);
+  const params = getEchoParams(level);
+
   const [stage, setStage] = useState<"getReady" | "stimulus" | "answer" | "reveal">("getReady");
-  const [roundData, setRoundData] = useState<EchoRoundData>(() => setupEchoRound());
+  const [roundData, setRoundData] = useState<EchoRoundData>(() => setupEchoRound(getEchoParams(streak ?? 0)));
   const [round, setRound] = useState(1);
   const [activeStimulusIndex, setActiveStimulusIndex] = useState<number>(-1);
   const [replayIndex, setReplayIndex] = useState<number>(-1);
   const [countdown, setCountdown] = useState<number>(5);
-  const autoAdvanceTimer = useRef<number | null>(null);
+  const timers = useRef<number[]>([]);
+
+  const clearTimers = () => {
+    timers.current.forEach((t) => clearTimeout(t));
+    timers.current = [];
+  };
 
   const handleNextRound = () => {
-    if (autoAdvanceTimer.current) {
-      clearTimeout(autoAdvanceTimer.current);
-      autoAdvanceTimer.current = null;
-    }
-    setRoundData(setupEchoRound());
+    clearTimers();
+    const nextLevel = roundData.isCorrect ? level + 1 : 0;
+    setLevel(nextLevel);
+    setRoundData(setupEchoRound(getEchoParams(nextLevel)));
     setRound((r) => r + 1);
     setActiveStimulusIndex(-1);
     setReplayIndex(-1);
@@ -43,61 +54,67 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
     setCountdown(5);
   };
 
-  /* Fire the sequence (unchanged timing) */
+  /* Fire the sequence — flash on, brief off-gap, next pad. The off-gap is
+     what makes a pad repeated twice in a row readable. */
   useEffect(() => {
     if (stage === "stimulus") {
-      let step = 0;
-      const playStep = () => {
-        if (step < roundData.sequence.length) {
-          setActiveStimulusIndex(roundData.sequence[step]);
-          playTick();
-          step++;
-          setTimeout(playStep, 600);
-        } else {
+      const { speed } = params;
+      roundData.sequence.forEach((padId, i) => {
+        timers.current.push(
+          window.setTimeout(() => {
+            setActiveStimulusIndex(padId);
+            playTick();
+          }, 600 + i * speed)
+        );
+        timers.current.push(
+          window.setTimeout(() => setActiveStimulusIndex(-1), 600 + i * speed + Math.round(speed * 0.65))
+        );
+      });
+      timers.current.push(
+        window.setTimeout(() => {
           setActiveStimulusIndex(-1);
-          setTimeout(() => setStage("answer"), 350);
-        }
-      };
-      const startTimer = setTimeout(playStep, 600);
-      return () => clearTimeout(startTimer);
+          setStage("answer");
+        }, 600 + roundData.sequence.length * params.speed + 350)
+      );
+      return clearTimers;
     }
   }, [stage, roundData.sequence]);
 
-  /* Reveal: replay the true sequence at tempo */
+  /* Reveal: replay the true sequence at the same tempo */
   useEffect(() => {
     if (stage === "reveal") {
       playRevealInterval();
-      onPlayed?.();
+      onResult?.(!!roundData.isCorrect);
 
+      const { speed } = params;
+      roundData.sequence.forEach((padId, i) => {
+        timers.current.push(
+          window.setTimeout(() => {
+            setReplayIndex(padId);
+            playTick();
+          }, 500 + i * speed)
+        );
+        timers.current.push(
+          window.setTimeout(() => setReplayIndex(-1), 500 + i * speed + Math.round(speed * 0.65))
+        );
+      });
+
+      /* Long sequences need a longer window before auto-advance */
+      const totalMs = 500 + roundData.sequence.length * speed + 2800;
+      setCountdown(Math.ceil(totalMs / 1000));
       const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
-
-      let replayStep = 0;
-      const playReplay = () => {
-        if (replayStep < roundData.sequence.length) {
-          setReplayIndex(roundData.sequence[replayStep]);
-          playTick();
-          replayStep++;
-          setTimeout(playReplay, 600);
-        } else {
-          setReplayIndex(-1);
-        }
-      };
-      const replayTimer = setTimeout(playReplay, 500);
-
-      const autoTimer = setTimeout(handleNextRound, 5400);
-      autoAdvanceTimer.current = autoTimer as unknown as number;
+      timers.current.push(window.setTimeout(handleNextRound, totalMs));
 
       return () => {
         clearInterval(interval);
-        clearTimeout(replayTimer);
-        clearTimeout(autoTimer);
+        clearTimers();
       };
     }
   }, [stage, roundData.sequence]);
 
   const handleSquareTap = (idx: number) => {
     if (stage !== "answer") return;
-    if (roundData.userTaps.includes(idx)) return;
+    if (!params.allowRepeat && roundData.userTaps.includes(idx)) return;
 
     playTick();
     triggerHaptic();
@@ -105,7 +122,7 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
     const updatedTaps = [...roundData.userTaps, idx];
     setRoundData((prev) => ({ ...prev, userTaps: updatedTaps }));
 
-    if (updatedTaps.length === 4) {
+    if (updatedTaps.length === params.seqLen) {
       const isCorrect = updatedTaps.join(",") === roundData.sequence.join(",");
       setRoundData((prev) => ({ ...prev, isCorrect }));
       setStage("reveal");
@@ -115,21 +132,55 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
   const isTapped = (id: number) => roundData.userTaps.includes(id);
   const tapOrder = (id: number) => roundData.userTaps.indexOf(id) + 1;
 
+  const gridCols = params.boxes <= 4 ? "grid-cols-2" : params.boxes <= 9 ? "grid-cols-3" : "grid-cols-4";
+  const gridWidth = params.boxes <= 4 ? "max-w-[300px]" : params.boxes <= 9 ? "max-w-[340px]" : "max-w-[400px]";
+
+  /* A row of chips in pad colors — used to compare the correct order
+     against the player's taps, works even when pads repeat */
+  const seqStrip = (label: string, seq: number[], compareTo?: number[]) => (
+    <div className="flex flex-col items-center gap-2">
+      <span className="font-mono font-extrabold text-[11px] tracking-[0.16em] uppercase text-mut">{label}</span>
+      <div className="flex flex-wrap justify-center gap-1.5 max-w-sm">
+        {seq.map((padId, i) => {
+          const wrong = compareTo !== undefined && compareTo[i] !== padId;
+          const color = roundData.squares.find((sq) => sq.id === padId)?.color;
+          return (
+            <span
+              key={i}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center font-mono font-extrabold text-[11px] text-paper tabular-nums ${
+                wrong ? "ring-2 ring-play-red ring-offset-2 ring-offset-paper" : ""
+              }`}
+              style={{ backgroundColor: color ? hslToCss(color) : "#ccc", textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}
+            >
+              {i + 1}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   const status =
     stage === "stimulus" ? "Watch the pads" :
-    stage === "answer" ? `Your turn · ${roundData.userTaps.length}/4` :
+    stage === "answer" ? `Your turn · ${roundData.userTaps.length}/${params.seqLen}` :
     stage === "reveal" ? `Next in ${countdown}s` :
-    `Round ${String(round).padStart(2, "0")}`;
+    `Level ${String(level + 1).padStart(2, "0")}`;
+
+  const readySteps = [
+    `Watch the ${params.boxes} pads fire in a sequence of ${params.seqLen}${params.allowRepeat ? " — pads can repeat" : ""}.`,
+    "Press them back in exactly that order.",
+    "Every correct answer raises the level: faster, bigger, trickier.",
+  ];
 
   return (
     <div id="echo-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Repeat the Pattern" status={status} onBack={onBack} />
+      <GameHead title="Repeat the Pattern" status={status} onBack={onBack} streak={streak} />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
           <Ready
             name="Repeat the Pattern"
-            instructions="Four pads fire in a sequence. Watch the order, then press them back in exactly that order."
+            steps={readySteps}
             glyph={<span className="scale-150 inline-block"><EchoGlyph /></span>}
             onComplete={() => setStage("stimulus")}
           />
@@ -137,10 +188,10 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
 
         {stage === "stimulus" && (
           <div className="flex flex-col items-center gap-7">
-            <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-mut">
+            <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-mut">
               Watch the order
             </span>
-            <div className="grid grid-cols-2 gap-3 w-full max-w-[300px]">
+            <div className={`grid ${gridCols} gap-3 w-full ${gridWidth}`}>
               {roundData.squares.map((sq) => {
                 const isActive = activeStimulusIndex === sq.id;
                 return (
@@ -160,10 +211,10 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
 
         {stage === "answer" && (
           <div className="flex flex-col items-center gap-7">
-            <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-ink tabular-nums">
-              Press them back · {roundData.userTaps.length}/4
+            <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-ink tabular-nums">
+              Press them back · {roundData.userTaps.length}/{params.seqLen}
             </span>
-            <div className="grid grid-cols-2 gap-3 w-full max-w-[300px]">
+            <div className={`grid ${gridCols} gap-3 w-full ${gridWidth}`}>
               {roundData.squares.map((sq) => {
                 const tapped = isTapped(sq.id);
                 return (
@@ -177,7 +228,7 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
                     style={{ backgroundColor: tapped ? hslToCss(sq.color) : tint(sq.color) }}
                     aria-label={`Pad ${sq.id + 1}`}
                   >
-                    {tapped && (
+                    {tapped && !params.allowRepeat && (
                       <motion.span
                         initial={{ scale: 1.6, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
@@ -191,40 +242,38 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
                 );
               })}
             </div>
+            {/* Live strip of your taps so far — essential once pads repeat */}
+            {params.allowRepeat && roundData.userTaps.length > 0 && seqStrip("Your taps", roundData.userTaps)}
           </div>
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center gap-9">
-            <Wobble active={!roundData.isCorrect} className="w-full max-w-[300px]">
-              <div className="grid grid-cols-2 gap-3 w-full">
+          <div className="flex flex-col items-center gap-8">
+            <Wobble active={!roundData.isCorrect} className={`w-full ${gridWidth}`}>
+              <div className={`grid ${gridCols} gap-3 w-full`}>
                 {roundData.squares.map((sq) => {
                   const isReplaying = replayIndex === sq.id;
-                  const seqPos = roundData.sequence.indexOf(sq.id) + 1;
-                  const yourPos = roundData.userTaps.indexOf(sq.id) + 1;
                   return (
                     <motion.div
                       key={sq.id}
                       id={`echo-reveal-square-${sq.id}`}
                       animate={isReplaying ? { scale: 1.06 } : { scale: 1 }}
                       transition={{ type: "spring", stiffness: 500, damping: 20 }}
-                      className="aspect-square w-full rounded-2xl relative border-[1.5px] border-line"
+                      className="aspect-square w-full rounded-2xl border-[1.5px] border-line"
                       style={{ backgroundColor: isReplaying ? hslToCss(sq.color) : tint(sq.color) }}
-                    >
-                      {/* True order, and yours when it differs */}
-                      <span className="absolute top-2 left-2 w-7 h-7 rounded-full bg-play-green text-paper font-mono font-extrabold text-[13px] flex items-center justify-center tabular-nums">
-                        {seqPos}
-                      </span>
-                      {yourPos !== seqPos && (
-                        <span className="absolute top-2 left-10 w-7 h-7 rounded-full bg-ink text-paper font-mono font-extrabold text-[13px] flex items-center justify-center tabular-nums">
-                          {yourPos}
-                        </span>
-                      )}
-                    </motion.div>
+                    />
                   );
                 })}
               </div>
             </Wobble>
+
+            {/* Correct order vs yours, step by step — mismatches ringed red */}
+            {!roundData.isCorrect && (
+              <div className="flex flex-col items-center gap-4">
+                {seqStrip("Correct", roundData.sequence)}
+                {seqStrip("Your", roundData.userTaps, roundData.sequence)}
+              </div>
+            )}
 
             <Verdict
               id="echo-reveal-verdict"
@@ -232,8 +281,8 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
               headline={roundData.isCorrect ? "Perfect echo." : "Sequence scrambled."}
               detail={
                 roundData.isCorrect
-                  ? "You played the pattern back exactly."
-                  : "Green is the true order, ink is yours. Watch the replay."
+                  ? `You played the pattern back exactly. Level ${level + 2} will push harder.`
+                  : "Compare the correct order with yours — the steps that went wrong are ringed in red. Watch the replay."
               }
               nextIn={countdown}
             />

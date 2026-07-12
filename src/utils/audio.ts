@@ -4,7 +4,9 @@
  */
 
 let audioCtx: AudioContext | null = null;
-let soundEnabled = false;
+/* Sound is on by default; the AudioContext is created lazily on the first
+   click so the browser's user-gesture requirement is always satisfied. */
+let soundEnabled = true;
 
 export function toggleSound(): boolean {
   soundEnabled = !soundEnabled;

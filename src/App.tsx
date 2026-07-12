@@ -72,10 +72,23 @@ interface Flood {
   phase: "expand" | "fade";
 }
 
+type StreakMap = Partial<Record<GameId, number>>;
+
+const STREAKS_KEY = "polo-streaks";
+
+const loadStreaks = (): StreakMap => {
+  try {
+    return JSON.parse(localStorage.getItem(STREAKS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+};
+
 export default function App() {
   const [activeGame, setActiveGame] = useState<GameId | null>(null);
-  const [soundOn, setSoundOn] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
   const [doneSet, setDoneSet] = useState<Set<GameId>>(new Set());
+  const [streaks, setStreaks] = useState<StreakMap>(loadStreaks);
   const [flood, setFlood] = useState<Flood | null>(null);
 
   const handleToggleSound = () => {
@@ -109,11 +122,22 @@ export default function App() {
     setActiveGame(null);
   };
 
-  const markPlayed = (id: GameId) => {
+  /* Games report each round: correct answers grow that game's streak,
+     a miss resets it. Streaks survive reloads via localStorage. */
+  const reportResult = (id: GameId, correct: boolean) => {
     setDoneSet((prev) => {
       if (prev.has(id)) return prev;
       const next = new Set(prev);
       next.add(id);
+      return next;
+    });
+    setStreaks((prev) => {
+      const next = { ...prev, [id]: correct ? (prev[id] ?? 0) + 1 : 0 };
+      try {
+        localStorage.setItem(STREAKS_KEY, JSON.stringify(next));
+      } catch {
+        /* storage unavailable — streaks stay session-only */
+      }
       return next;
     });
   };
@@ -121,7 +145,8 @@ export default function App() {
   const gameProps = (id: GameId) => ({
     accentColor: gamesList.find((g) => g.id === id)!.accent,
     onBack: handleBackToHome,
-    onPlayed: () => markPlayed(id),
+    onResult: (correct: boolean) => reportResult(id, correct),
+    streak: streaks[id] ?? 0,
   });
 
   return (
@@ -158,7 +183,7 @@ export default function App() {
                   <h1 className="relative font-display font-extrabold text-3xl sm:text-5xl tracking-tight text-ink mb-3">
                     Train your eye.
                   </h1>
-                  <span className="relative font-mono font-medium text-[11px] tracking-[0.2em] uppercase text-mut tabular-nums">
+                  <span className="relative font-mono font-medium text-[12px] tracking-[0.2em] uppercase text-mut tabular-nums">
                     Daily drill · <b className="text-ink font-extrabold">{doneSet.size} of {gamesList.length}</b> instruments done
                   </span>
                 </div>
@@ -176,15 +201,15 @@ export default function App() {
                       className="tile-press bg-paper border-[1.5px] border-line rounded-3xl p-6 pb-5 text-left cursor-pointer flex flex-col"
                     >
                       <span className="tile-glyph h-[52px] flex items-center mb-4">{game.glyph}</span>
-                      <span className="font-display font-medium text-[15px] text-ink mb-1.5">{game.name}</span>
-                      <span className="text-[13px] text-mut leading-relaxed mb-5">{game.oneLiner}</span>
+                      <span className="font-display font-medium text-[16px] text-ink mb-1.5">{game.name}</span>
+                      <span className="text-[14px] text-mut leading-relaxed mb-5">{game.oneLiner}</span>
                       <span className="mt-auto flex items-center justify-between">
-                        {doneSet.has(game.id) ? (
-                          <span className="font-mono font-extrabold text-[10px] tracking-[0.14em] uppercase text-paper bg-play-green rounded-full px-2.5 py-1">
-                            Done
+                        {(streaks[game.id] ?? 0) > 0 ? (
+                          <span className="font-mono font-extrabold text-[10.5px] tracking-[0.14em] uppercase text-ink bg-play-yellow rounded-full px-2.5 py-1 tabular-nums">
+                            Streak {streaks[game.id]}
                           </span>
                         ) : (
-                          <span className="font-mono font-medium text-[10.5px] tracking-[0.14em] uppercase text-mut">
+                          <span className="font-mono font-medium text-[11px] tracking-[0.14em] uppercase text-mut">
                             Ready
                           </span>
                         )}

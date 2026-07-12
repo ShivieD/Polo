@@ -15,10 +15,11 @@ import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 interface GameProps {
   accentColor: string;
   onBack: () => void;
-  onPlayed?: () => void;
+  onResult?: (correct: boolean) => void;
+  streak?: number;
 }
 
-export const SwatchGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
+export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const [stage, setStage] = useState<"getReady" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundData, setRoundData] = useState<SwatchRoundData>(() => setupSwatchRound());
   const [round, setRound] = useState(1);
@@ -43,10 +44,18 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
     }
   }, [stage]);
 
+  const correct = roundData.options.find((o) => o.isCorrect)?.color;
+  const isUserCorrect =
+    !!roundData.userSelection &&
+    !!correct &&
+    correct.h === roundData.userSelection.h &&
+    correct.s === roundData.userSelection.s &&
+    correct.l === roundData.userSelection.l;
+
   useEffect(() => {
     if (stage === "reveal") {
       playRevealInterval();
-      onPlayed?.();
+      onResult?.(isUserCorrect);
 
       const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
       const timer = setTimeout(handleNextRound, 4000);
@@ -67,14 +76,6 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
     setStage("reveal");
   };
 
-  const correct = roundData.options.find((o) => o.isCorrect)?.color;
-  const isUserCorrect =
-    !!roundData.userSelection &&
-    !!correct &&
-    correct.h === roundData.userSelection.h &&
-    correct.s === roundData.userSelection.s &&
-    correct.l === roundData.userSelection.l;
-
   const status =
     stage === "stimulus" ? "Memorize it" :
     stage === "answer" ? "Which one was it?" :
@@ -83,13 +84,17 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
 
   return (
     <div id="swatch-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Color Match" status={status} onBack={onBack} />
+      <GameHead title="Color Match" status={status} onBack={onBack} streak={streak} />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
           <Ready
             name="Color Match"
-            instructions="One color, two seconds. Then it hides among five near-identical impostors. Tap the exact one you saw."
+            steps={[
+              "Memorize one color — you get two seconds.",
+              "It hides among five near-identical impostors.",
+              "Tap the exact color you saw.",
+            ]}
             glyph={<span className="scale-150 inline-block"><SwatchGlyph /></span>}
             onComplete={() => setStage("stimulus")}
           />
@@ -102,7 +107,7 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
             transition={{ type: "spring", stiffness: 340, damping: 22 }}
             className="flex flex-col items-center gap-6"
           >
-            <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-mut">
+            <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-mut">
               Memorize this color
             </span>
             <div
@@ -115,7 +120,7 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
 
         {stage === "answer" && (
           <div className="flex flex-col items-center gap-7">
-            <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-ink">
+            <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-ink">
               Tap the exact match
             </span>
             <div className="grid grid-cols-3 gap-3 w-full max-w-sm">
@@ -139,6 +144,8 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
         {stage === "reveal" && (
           <div className="flex flex-col items-center gap-9">
             <Wobble active={!isUserCorrect} className="w-full max-w-sm flex justify-center">
+              {/* Every color stays at full strength; tags sit BELOW the
+                  swatches so they never blend into a similar color */}
               <div className="grid grid-cols-3 gap-3 w-full">
                 {roundData.options.map((opt, idx) => {
                   const isSelected =
@@ -148,28 +155,30 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
                     roundData.userSelection.l === opt.color.l;
 
                   return (
-                    <div
-                      key={idx}
-                      id={`swatch-reveal-option-${idx}`}
-                      className={`aspect-square w-full rounded-2xl relative transition-all ${
-                        opt.isCorrect
-                          ? "ring-[3px] ring-ink ring-offset-2 ring-offset-paper"
-                          : isSelected
-                            ? "ring-2 ring-play-red ring-offset-2 ring-offset-paper"
-                            : "opacity-45"
-                      }`}
-                      style={{ backgroundColor: hslToCss(opt.color) }}
-                    >
-                      {opt.isCorrect && (
-                        <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 font-mono font-extrabold text-[9px] tracking-[0.1em] uppercase bg-play-green text-paper rounded-full px-2 py-0.5">
-                          It
-                        </span>
-                      )}
-                      {isSelected && !opt.isCorrect && (
-                        <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 font-mono font-extrabold text-[9px] tracking-[0.1em] uppercase bg-ink text-paper rounded-full px-2 py-0.5">
-                          You
-                        </span>
-                      )}
+                    <div key={idx} className="flex flex-col items-center gap-1.5">
+                      <div
+                        id={`swatch-reveal-option-${idx}`}
+                        className={`aspect-square w-full rounded-2xl ${
+                          opt.isCorrect
+                            ? "ring-[3px] ring-ink ring-offset-2 ring-offset-paper"
+                            : isSelected
+                              ? "ring-2 ring-play-red ring-offset-2 ring-offset-paper"
+                              : ""
+                        }`}
+                        style={{ backgroundColor: hslToCss(opt.color) }}
+                      />
+                      <span className="h-5 flex items-center">
+                        {opt.isCorrect && (
+                          <span className="font-mono font-extrabold text-[9.5px] tracking-[0.1em] uppercase bg-play-green text-paper rounded-full px-2 py-0.5">
+                            Correct
+                          </span>
+                        )}
+                        {isSelected && !opt.isCorrect && (
+                          <span className="font-mono font-extrabold text-[9.5px] tracking-[0.1em] uppercase bg-ink text-paper rounded-full px-2 py-0.5">
+                            Your
+                          </span>
+                        )}
+                      </span>
                     </div>
                   );
                 })}
@@ -183,7 +192,7 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
               detail={
                 isUserCorrect
                   ? "You picked the exact specimen from the lineup."
-                  : "The real one is ringed in ink. Compare it against your pick."
+                  : "The correct color is ringed in ink — compare it against your pick."
               }
               nextIn={countdown}
             />

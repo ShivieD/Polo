@@ -15,10 +15,11 @@ import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 interface GameProps {
   accentColor: string;
   onBack: () => void;
-  onPlayed?: () => void;
+  onResult?: (correct: boolean) => void;
+  streak?: number;
 }
 
-export const BetweenGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
+export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const [stage, setStage] = useState<"getReady" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundData, setRoundData] = useState<BetweenRoundData>(() => setupBetweenRound());
   const [round, setRound] = useState(1);
@@ -47,7 +48,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
   useEffect(() => {
     if (stage === "reveal") {
       playRevealInterval();
-      onPlayed?.();
+      onResult?.((roundData.score ?? 0) >= 85);
 
       const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
       const timer = setTimeout(handleNextRound, 5000);
@@ -121,13 +122,17 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
 
   return (
     <div id="between-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Find the Spot" status={status} onBack={onBack} />
+      <GameHead title="Find the Spot" status={status} onBack={onBack} streak={streak} />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
           <Ready
             name="Find the Spot"
-            instructions="Study the full gradient. We hide it, show you one color from somewhere inside it, and you pin that color back to its exact home on the bar."
+            steps={[
+              "Study and memorize the gradient.",
+              "We hide it and show you one color from somewhere inside it.",
+              "Move the slider to the spot where you think that color lived.",
+            ]}
             glyph={<span className="scale-150 inline-block"><BetweenGlyph /></span>}
             onComplete={() => setStage("stimulus")}
           />
@@ -140,7 +145,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
             transition={{ type: "spring", stiffness: 320, damping: 24 }}
             className="flex flex-col items-center gap-6"
           >
-            <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-mut">
+            <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-mut">
               Memorize the gradient
             </span>
             <div
@@ -160,7 +165,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
                 className="w-24 h-24 rounded-2xl border-[1.5px] border-line shrink-0"
                 style={{ backgroundColor: hslToCss(targetColor) }}
               />
-              <p className="text-[14px] text-mut max-w-[26ch] leading-relaxed">
+              <p className="text-[15px] text-mut max-w-[26ch] leading-relaxed">
                 <b className="text-ink font-semibold">Where does this color live?</b><br />
                 Drag the needle to the point on the hidden gradient.
               </p>
@@ -193,7 +198,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
 
         {stage === "reveal" && (
           <div className="flex flex-col items-center w-full gap-9">
-            {/* Gradient with staggered pins: TRUE above, YOU below — the
+            {/* Gradient with staggered pins: Correct above, Your below — the
                 tags can never collide, even on a perfect guess */}
             <div className="w-full max-w-md pt-9 pb-8">
               <div className="relative w-full h-14 rounded-full border-[1.5px] border-line" style={{ background: gradientStyle }}>
@@ -205,8 +210,8 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
                   className="absolute -top-[14px] bottom-[12px] w-[9px] bg-paper border-2 border-ink rounded-[5px]"
                   style={{ left: `${roundData.truePosition * 100}%`, transform: "translateX(-50%)" }}
                 >
-                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 font-mono font-extrabold text-[9.5px] tracking-[0.1em] text-ink">
-                    TRUE
+                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 font-mono font-extrabold text-[10px] tracking-[0.1em] uppercase text-paper bg-play-green rounded-full px-2 py-0.5 whitespace-nowrap">
+                    Correct
                   </span>
                 </motion.div>
                 <motion.div
@@ -217,8 +222,8 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
                   className="absolute top-[12px] -bottom-[14px] w-[5px] bg-ink rounded-[3px]"
                   style={{ left: `${roundData.guessPosition * 100}%`, transform: "translateX(-50%)" }}
                 >
-                  <span className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 font-mono font-extrabold text-[9.5px] tracking-[0.1em] text-ink">
-                    YOU
+                  <span className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 font-mono font-extrabold text-[10px] tracking-[0.1em] uppercase text-paper bg-ink rounded-full px-2 py-0.5 whitespace-nowrap">
+                    Your
                   </span>
                 </motion.div>
               </div>

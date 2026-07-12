@@ -15,10 +15,11 @@ import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 interface GameProps {
   accentColor: string;
   onBack: () => void;
-  onPlayed?: () => void;
+  onResult?: (correct: boolean) => void;
+  streak?: number;
 }
 
-export const MixGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
+export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const [stage, setStage] = useState<"getReady" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundData, setRoundData] = useState<MixRoundData>(() => setupMixRound());
   const [round, setRound] = useState(1);
@@ -46,7 +47,7 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
   useEffect(() => {
     if (stage === "reveal") {
       playRevealInterval();
-      onPlayed?.();
+      onResult?.((roundData.score ?? 0) >= 75);
 
       const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
       const timer = setTimeout(handleNextRound, 5000);
@@ -79,12 +80,14 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
   const lightGradient = `linear-gradient(to right, black, hsl(${roundData.userColor.h}, ${roundData.userColor.s}%, 50%), white)`;
 
   const score = roundData.score ?? 0;
+  /* Bands calibrated to the CIEDE2000 score: 90+ means the difference is
+     barely visible; 75+ means close but clearly distinguishable. */
   const verdictHead =
-    score >= 90 ? "Resonance." : score >= 70 ? "Nearly there." : "Different animal.";
+    score >= 90 ? "Resonance." : score >= 75 ? "Nearly there." : "Different animal.";
   const verdictDetail =
     score >= 90
       ? "Your mix melts into the target."
-      : score >= 70
+      : score >= 75
         ? "Squint and they merge. Fine-tune the lightness next time."
         : "Compare the pair above — usually it's saturation that drifts first.";
 
@@ -124,13 +127,17 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
 
   return (
     <div id="mix-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Color Mixer" status={status} onBack={onBack} />
+      <GameHead title="Color Mixer" status={status} onBack={onBack} streak={streak} />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
           <Ready
             name="Color Mixer"
-            instructions="Study the target color. Then rebuild it from memory with the hue, saturation, and lightness dials."
+            steps={[
+              "Study and memorize the target color — you get two seconds.",
+              "Rebuild it from memory with the hue, saturation and lightness dials.",
+              "Lock it in to see how close your mix really is.",
+            ]}
             glyph={<span className="scale-150 inline-block"><MixGlyph /></span>}
             onComplete={() => setStage("stimulus")}
           />
@@ -143,7 +150,7 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
             transition={{ type: "spring", stiffness: 340, damping: 22 }}
             className="flex flex-col items-center gap-6"
           >
-            <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-mut">
+            <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-mut">
               Memorize this color
             </span>
             <div
@@ -162,7 +169,7 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
                 className="w-24 h-24 rounded-2xl border-[1.5px] border-line shrink-0"
                 style={{ backgroundColor: hslToCss(roundData.userColor) }}
               />
-              <p className="text-[14px] text-mut max-w-[24ch] leading-relaxed">
+              <p className="text-[15px] text-mut max-w-[24ch] leading-relaxed">
                 <b className="text-ink font-semibold">Your live mix.</b><br />
                 Dial it until it matches the color you memorized.
               </p>
@@ -188,7 +195,7 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
                   className="w-32 h-32 sm:w-36 sm:h-36 rounded-l-3xl"
                   style={{ backgroundColor: hslToCss(roundData.targetColor) }}
                 />
-                <span className="font-mono font-extrabold text-[10px] tracking-[0.14em] uppercase text-mut">Target</span>
+                <span className="font-mono font-extrabold text-[11px] tracking-[0.14em] uppercase text-mut">Correct</span>
               </div>
               <div className="flex flex-col items-center gap-2.5">
                 <div
@@ -196,13 +203,13 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onPlayed }) => {
                   className="w-32 h-32 sm:w-36 sm:h-36 rounded-r-3xl"
                   style={{ backgroundColor: hslToCss(roundData.userColor) }}
                 />
-                <span className="font-mono font-extrabold text-[10px] tracking-[0.14em] uppercase text-mut">Yours</span>
+                <span className="font-mono font-extrabold text-[11px] tracking-[0.14em] uppercase text-mut">Your</span>
               </div>
             </div>
 
             <Verdict
               id="mix-reveal-score"
-              ok={score >= 70}
+              ok={score >= 75}
               headline={verdictHead}
               detail={verdictDetail}
               score={String(score)}
