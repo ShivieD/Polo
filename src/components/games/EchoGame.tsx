@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { EchoRoundData } from "../../types";
 import { setupEchoRound, getEchoParams } from "../../utils/gameLogic";
 import { hslToCss, HSL } from "../../utils/color";
-import { GameHead, Ready, Verdict, Btn, Wobble } from "../ui/Kit";
+import { GameHead, Ready, VerdictHead, VerdictBody, Btn, Wobble } from "../ui/Kit";
 import { EchoGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -249,40 +249,55 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
 
         {stage === "reveal" && (
           <div className="flex flex-col items-center gap-8">
+            <VerdictHead
+              id="echo-reveal-verdict"
+              ok={!!roundData.isCorrect}
+              headline={roundData.isCorrect ? "Perfect echo." : "Sequence scrambled."}
+            />
+
             <Wobble active={!roundData.isCorrect} className={`w-full ${gridWidth}`}>
               <div className={`grid ${gridCols} gap-3 w-full`}>
                 {roundData.squares.map((sq) => {
                   const isReplaying = replayIndex === sq.id;
+                  /* A pad can hold several positions once repeats unlock */
+                  const correctPos = roundData.sequence
+                    .map((p, i) => (p === sq.id ? i + 1 : 0))
+                    .filter(Boolean);
+                  const yourPos = roundData.userTaps
+                    .map((p, i) => (p === sq.id ? i + 1 : 0))
+                    .filter(Boolean);
+                  const matches = correctPos.join(",") === yourPos.join(",");
                   return (
                     <motion.div
                       key={sq.id}
                       id={`echo-reveal-square-${sq.id}`}
                       animate={isReplaying ? { scale: 1.06 } : { scale: 1 }}
                       transition={{ type: "spring", stiffness: 500, damping: 20 }}
-                      className="aspect-square w-full rounded-2xl border-[1.5px] border-line"
+                      className="aspect-square w-full rounded-2xl relative border-[1.5px] border-line"
                       style={{ backgroundColor: isReplaying ? hslToCss(sq.color) : tint(sq.color) }}
-                    />
+                    >
+                      {/* Correct order, and yours when it differs */}
+                      {correctPos.length > 0 && (
+                        <span className="absolute top-2 left-2 min-w-7 h-7 px-1.5 rounded-full bg-play-green text-paper font-mono font-extrabold text-[13px] flex items-center justify-center tabular-nums">
+                          {correctPos.join("·")}
+                        </span>
+                      )}
+                      {!matches && yourPos.length > 0 && (
+                        <span className="absolute top-2 left-10 min-w-7 h-7 px-1.5 rounded-full bg-ink text-paper font-mono font-extrabold text-[13px] flex items-center justify-center tabular-nums">
+                          {yourPos.join("·")}
+                        </span>
+                      )}
+                    </motion.div>
                   );
                 })}
               </div>
             </Wobble>
 
-            {/* Correct order vs yours, step by step — mismatches ringed red */}
-            {!roundData.isCorrect && (
-              <div className="flex flex-col items-center gap-4">
-                {seqStrip("Correct", roundData.sequence)}
-                {seqStrip("Your", roundData.userTaps, roundData.sequence)}
-              </div>
-            )}
-
-            <Verdict
-              id="echo-reveal-verdict"
-              ok={!!roundData.isCorrect}
-              headline={roundData.isCorrect ? "Perfect echo." : "Sequence scrambled."}
+            <VerdictBody
               detail={
                 roundData.isCorrect
                   ? `You played the pattern back exactly. Level ${level + 2} will push harder.`
-                  : "Compare the correct order with yours — the steps that went wrong are ringed in red. Watch the replay."
+                  : "Green is the correct order, ink is yours. Watch the replay."
               }
               nextIn={countdown}
             />

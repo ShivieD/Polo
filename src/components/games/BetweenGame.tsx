@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { BetweenRoundData } from "../../types";
 import { setupBetweenRound, interpolateHsl } from "../../utils/gameLogic";
 import { hslToCss } from "../../utils/color";
-import { GameHead, Panel, Ready, Verdict, Btn } from "../ui/Kit";
+import { GameHead, Panel, Ready, VerdictHead, VerdictBody, Btn } from "../ui/Kit";
 import { BetweenGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -197,7 +197,9 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center w-full gap-9">
+          <div className="flex flex-col items-center w-full gap-6">
+            <VerdictHead id="between-reveal-verdict" ok={score >= 85} headline={verdictHead} />
+
             {/* Gradient with staggered pins: Correct above, Your below — the
                 tags can never collide, even on a perfect guess */}
             <div className="w-full max-w-md pt-9 pb-8">
@@ -229,10 +231,8 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
               </div>
             </div>
 
-            <Verdict
+            <VerdictBody
               id="between-reveal-score"
-              ok={score >= 85}
-              headline={verdictHead}
               detail={verdictDetail}
               score={String(score)}
               scoreCaption="Accuracy / 100"

@@ -173,7 +173,7 @@ export const Countdown: React.FC<{ onComplete: () => void; label?: string }> = (
    with one instruction per step beside it */
 export const StepsTimeline: React.FC<{ steps: string[]; className?: string }> = ({ steps, className = "" }) => (
   <ol className={`relative flex flex-col gap-6 text-left ${className}`}>
-    {steps.length > 1 && <i aria-hidden="true" className="absolute left-[15px] top-4 bottom-4 w-[2px] bg-line" />}
+    {steps.length > 1 && <i aria-hidden="true" className="absolute left-[15px] top-4 bottom-4 w-[2px] bg-ink" />}
     {steps.map((step, i) => (
       <li key={i} className="relative flex items-start gap-4">
         <span className="w-8 h-8 shrink-0 rounded-full border-2 border-ink bg-paper font-mono font-extrabold text-[13px] flex items-center justify-center tabular-nums z-10">
@@ -217,39 +217,54 @@ export const Ready: React.FC<{
 /* Verdict — the moment after an answer. Pops in with verdict weight   */
 /* ------------------------------------------------------------------ */
 
-export const Verdict: React.FC<{
+/* The verdict is split in two: the pill + headline stamp in ABOVE the
+   result board, while the explanation, countdown and CTA rest below it. */
+export const VerdictHead: React.FC<{
   ok: boolean;
   headline: string;
-  detail: string;
-  score?: string;
-  scoreCaption?: string;
-  nextIn?: number;
   id?: string;
-}> = ({ ok, headline, detail, score, scoreCaption, nextIn, id }) => (
+}> = ({ ok, headline, id }) => (
   <motion.div
     id={id}
     initial={{ scale: 1.35, opacity: 0 }}
     animate={{ scale: 1, opacity: 1 }}
     transition={{ type: "spring", stiffness: 380, damping: 22 }}
-    className="flex flex-col items-center text-center gap-1"
+    className="flex flex-col items-center text-center gap-3"
   >
     <span
-      className={`font-mono font-extrabold text-[11px] tracking-[0.16em] uppercase px-3.5 py-1.5 rounded-full mb-3 ${
+      className={`font-mono font-extrabold text-[11px] tracking-[0.16em] uppercase px-3.5 py-1.5 rounded-full ${
         ok ? "bg-play-green text-paper" : "bg-play-red text-paper"
       }`}
     >
       {ok ? "Correct!" : "Miss"}
     </span>
+    <h3 className="font-display font-extrabold text-xl sm:text-2xl tracking-tight text-ink">{headline}</h3>
+  </motion.div>
+);
+
+export const VerdictBody: React.FC<{
+  detail: string;
+  score?: string;
+  scoreCaption?: string;
+  nextIn?: number;
+  id?: string;
+}> = ({ detail, score, scoreCaption, nextIn, id }) => (
+  <motion.div
+    id={id}
+    initial={{ opacity: 0, y: 10 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ type: "spring", stiffness: 340, damping: 24, delay: 0.08 }}
+    className="flex flex-col items-center text-center gap-1"
+  >
     {score !== undefined && (
       <div className="font-mono font-extrabold text-6xl leading-none tabular-nums text-ink">{score}</div>
     )}
     {scoreCaption && (
       <div className="font-mono font-medium text-[11px] tracking-[0.16em] uppercase text-mut mt-1">{scoreCaption}</div>
     )}
-    <h3 className="font-display font-extrabold text-xl sm:text-2xl tracking-tight text-ink mt-3">{headline}</h3>
-    <p className="text-[15px] text-mut max-w-sm leading-relaxed mt-1">{detail}</p>
+    <p className={`text-[15px] text-mut max-w-sm leading-relaxed ${score !== undefined ? "mt-3" : ""}`}>{detail}</p>
     {nextIn !== undefined && (
-      <span className="font-mono font-medium text-[12px] tracking-[0.14em] uppercase text-mut mt-4 tabular-nums">
+      <span className="font-mono font-medium text-[12px] tracking-[0.14em] uppercase text-mut mt-3 tabular-nums">
         Next round in {nextIn}s
       </span>
     )}

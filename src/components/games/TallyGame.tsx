@@ -7,7 +7,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { TallyRoundData, TallyMode, TallyShape } from "../../types";
 import { setupTallyRound } from "../../utils/gameLogic";
-import { GameHead, Ready, Verdict, Btn, Wobble, Countdown } from "../ui/Kit";
+import { GameHead, Ready, VerdictHead, VerdictBody, Btn, Wobble, Countdown } from "../ui/Kit";
 import { TallyGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -36,6 +36,42 @@ const PieceShape: React.FC<{ shape?: TallyShape; color: string }> = ({ shape, co
       style={{ backgroundColor: color }}
     />
   );
+
+/* Little illustrations for the mode picker cards */
+const DotsIllo: React.FC = () => (
+  <span aria-hidden="true" className="w-16 h-16 shrink-0 rounded-xl bg-paper border-[1.5px] border-line grid grid-cols-3 gap-1.5 p-3">
+    {Array.from({ length: 9 }).map((_, i) => (
+      <i key={i} className="rounded-full bg-play-yellow" />
+    ))}
+  </span>
+);
+
+const ShapesIllo: React.FC = () => (
+  <span aria-hidden="true" className="w-16 h-16 shrink-0 rounded-xl bg-paper border-[1.5px] border-line grid grid-cols-2 gap-1.5 p-3">
+    <i className="rounded-full bg-play-green" />
+    <i className="rounded-[4px] bg-play-yellow" />
+    <svg viewBox="0 0 100 100" className="w-full h-full block">
+      <polygon points="50,8 96,92 4,92" fill="#2d6cf6" />
+    </svg>
+    <i className="rounded-[4px] bg-play-red" />
+  </span>
+);
+
+/* Radio-style check indicator, filled when the card is selected */
+const CheckDot: React.FC<{ on: boolean }> = ({ on }) => (
+  <span
+    aria-hidden="true"
+    className={`ml-auto w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+      on ? "bg-play-yellow" : "border-2 border-line"
+    }`}
+  >
+    {on && (
+      <svg width="16" height="13" viewBox="0 0 16 13">
+        <path d="M1.5 6.5 6 11 14.5 1.5" fill="none" stroke="#111116" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )}
+  </span>
+);
 
 export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const [stage, setStage] = useState<"getReady" | "stimulus" | "answer" | "reveal">("getReady");
@@ -219,7 +255,7 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 320, damping: 26 }}
-      className="flex flex-col items-center text-center max-w-md mx-auto py-8 select-none"
+      className="flex flex-col items-center text-center max-w-2xl mx-auto py-8 select-none"
     >
       <div className="mb-7 flex justify-center"><span className="scale-150 inline-block"><TallyGlyph /></span></div>
       <h2 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-ink mb-3">Count the Dots</h2>
@@ -229,28 +265,36 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
         <button
           id="tally-mode-dots"
           onClick={() => { playTick(); triggerHaptic(); setMode("dots"); }}
-          className={`text-left rounded-2xl border-2 p-5 cursor-pointer transition-colors ${
-            mode === "dots" ? "border-ink bg-wash" : "border-line bg-paper hover:border-mut"
+          className={`flex items-center gap-4 text-left rounded-2xl border-2 p-4 cursor-pointer transition-colors ${
+            mode === "dots" ? "border-play-yellow bg-[#FFF8E1]" : "border-line bg-paper hover:border-mut"
           }`}
           aria-pressed={mode === "dots"}
         >
-          <span className="font-display font-extrabold text-[16px] text-ink block mb-1.5">Dots</span>
-          <span className="text-[14px] text-mut leading-relaxed block">
-            One kind of piece. More of them, faster, every run.
+          <DotsIllo />
+          <span className="flex-1 min-w-0">
+            <span className="font-display font-extrabold text-[16px] text-ink block mb-1">Dots</span>
+            <span className="text-[14px] text-mut leading-snug block">
+              One kind of piece. More of them, faster, every run.
+            </span>
           </span>
+          <CheckDot on={mode === "dots"} />
         </button>
         <button
           id="tally-mode-shapes"
           onClick={() => { playTick(); triggerHaptic(); setMode("shapes"); }}
-          className={`text-left rounded-2xl border-2 p-5 cursor-pointer transition-colors ${
-            mode === "shapes" ? "border-ink bg-wash" : "border-line bg-paper hover:border-mut"
+          className={`flex items-center gap-4 text-left rounded-2xl border-2 p-4 cursor-pointer transition-colors ${
+            mode === "shapes" ? "border-play-yellow bg-[#FFF8E1]" : "border-line bg-paper hover:border-mut"
           }`}
           aria-pressed={mode === "shapes"}
         >
-          <span className="font-display font-extrabold text-[16px] text-ink block mb-1.5">Shapes</span>
-          <span className="text-[14px] text-mut leading-relaxed block">
-            Circles, squares & triangles mixed — count just one kind.
+          <ShapesIllo />
+          <span className="flex-1 min-w-0">
+            <span className="font-display font-extrabold text-[16px] text-ink block mb-1">Shapes</span>
+            <span className="text-[14px] text-mut leading-snug block">
+              Circles, squares & triangles mixed — count just one kind.
+            </span>
           </span>
+          <CheckDot on={mode === "shapes"} />
         </button>
       </div>
 
@@ -290,11 +334,11 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
 
         {stage === "stimulus" && (
           <div className="flex flex-col items-center gap-6">
-            <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-mut tabular-nums flex items-center gap-2">
+            <span className="font-sans font-bold text-[17px] text-ink flex items-center gap-2.5">
               {roundData.mode === "shapes" ? (
                 <>
                   Count only the {targetLabel}
-                  <span className="w-4 h-4 inline-block"><PieceShape shape={roundData.targetShape} color="#111116" /></span>
+                  <span className="w-5 h-5 inline-block"><PieceShape shape={roundData.targetShape} color="#111116" /></span>
                 </>
               ) : (
                 "Count the pieces"
@@ -306,10 +350,10 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
 
         {stage === "answer" && (
           <div className="flex flex-col items-center gap-8">
-            <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-ink flex items-center gap-2">
+            <span className="font-display font-extrabold text-xl sm:text-2xl tracking-tight text-ink flex items-center gap-3 text-center">
               How many {targetLabel} landed?
               {roundData.mode === "shapes" && (
-                <span className="w-4 h-4 inline-block"><PieceShape shape={roundData.targetShape} color="#111116" /></span>
+                <span className="w-6 h-6 inline-block shrink-0"><PieceShape shape={roundData.targetShape} color="#111116" /></span>
               )}
             </span>
             <div className="grid grid-cols-4 gap-3 w-full max-w-sm">
@@ -332,9 +376,7 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
 
         {stage === "reveal" && (
           <div className="flex flex-col items-center gap-8">
-            <Wobble active={!isUserCorrect}>{board("w-52 h-52", 2.1, false)}</Wobble>
-
-            <Verdict
+            <VerdictHead
               id="tally-reveal-verdict"
               ok={isUserCorrect}
               headline={
@@ -342,6 +384,11 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
                   ? "Exact count."
                   : `Off by ${Math.abs((roundData.userSelection ?? 0) - roundData.trueCount)}.`
               }
+            />
+
+            <Wobble active={!isUserCorrect}>{board("w-52 h-52", 2.1, false)}</Wobble>
+
+            <VerdictBody
               detail={
                 justUnlocked
                   ? `You conquered a ${roundData.trueCount}-piece board — Shapes mode is now unlocked. Pick it on the next round screen.`

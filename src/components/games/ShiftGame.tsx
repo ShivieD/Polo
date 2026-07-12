@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { ShiftRoundData } from "../../types";
 import { setupShiftRound } from "../../utils/gameLogic";
 import { hslToCss } from "../../utils/color";
-import { GameHead, Ready, Verdict, Btn, Loader, Wobble } from "../ui/Kit";
+import { GameHead, Ready, VerdictHead, VerdictBody, Btn, Loader, Wobble } from "../ui/Kit";
 import { ShiftGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -154,7 +154,13 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center gap-9">
+          <div className="flex flex-col items-center gap-8">
+            <VerdictHead
+              id="shift-reveal-verdict"
+              ok={isUserCorrect}
+              headline={isUserCorrect ? "Drift detected." : "It slipped past."}
+            />
+
             <Wobble active={!isUserCorrect} className="w-full max-w-sm">
               {/* Both rows at full, true color — no fading. Tags live BELOW
                   the tiles so they never blend into a similar swatch. */}
@@ -228,10 +234,7 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
               </div>
             </Wobble>
 
-            <Verdict
-              id="shift-reveal-verdict"
-              ok={isUserCorrect}
-              headline={isUserCorrect ? "Drift detected." : "It slipped past."}
+            <VerdictBody
               detail={
                 isUserCorrect
                   ? "You caught the changed block dead on. Compare before and after to see the drift."

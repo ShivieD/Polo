@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { SwatchRoundData } from "../../types";
 import { setupSwatchRound } from "../../utils/gameLogic";
 import { hslToCss, HSL } from "../../utils/color";
-import { GameHead, Ready, Verdict, Btn, Wobble } from "../ui/Kit";
+import { GameHead, Ready, VerdictHead, VerdictBody, Btn, Wobble } from "../ui/Kit";
 import { SwatchGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -142,7 +142,13 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =>
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center gap-9">
+          <div className="flex flex-col items-center gap-8">
+            <VerdictHead
+              id="swatch-reveal-verdict"
+              ok={isUserCorrect}
+              headline={isUserCorrect ? "Spot on." : "An impostor got you."}
+            />
+
             <Wobble active={!isUserCorrect} className="w-full max-w-sm flex justify-center">
               {/* Every color stays at full strength; tags sit BELOW the
                   swatches so they never blend into a similar color */}
@@ -185,10 +191,7 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =>
               </div>
             </Wobble>
 
-            <Verdict
-              id="swatch-reveal-verdict"
-              ok={isUserCorrect}
-              headline={isUserCorrect ? "Spot on." : "An impostor got you."}
+            <VerdictBody
               detail={
                 isUserCorrect
                   ? "You picked the exact specimen from the lineup."

@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { MixRoundData } from "../../types";
 import { setupMixRound } from "../../utils/gameLogic";
 import { hslToCss, getScoreForColors } from "../../utils/color";
-import { GameHead, Ready, Verdict, Btn } from "../ui/Kit";
+import { GameHead, Ready, VerdictHead, VerdictBody, Btn } from "../ui/Kit";
 import { MixGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -186,7 +186,9 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center gap-9">
+          <div className="flex flex-col items-center gap-8">
+            <VerdictHead id="mix-reveal-verdict" ok={score >= 75} headline={verdictHead} />
+
             {/* Target vs yours, side by side, seam shared */}
             <div className="flex items-stretch">
               <div className="flex flex-col items-center gap-2.5">
@@ -207,10 +209,8 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
               </div>
             </div>
 
-            <Verdict
+            <VerdictBody
               id="mix-reveal-score"
-              ok={score >= 75}
-              headline={verdictHead}
               detail={verdictDetail}
               score={String(score)}
               scoreCaption="Match / 100"
