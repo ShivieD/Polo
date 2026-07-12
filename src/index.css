@@ -1,0 +1,200 @@
+@import url('https://fonts.googleapis.com/css2?family=Unbounded:wght@500;800&family=JetBrains+Mono:wght@500;700;800&display=swap');
+@import "tailwindcss";
+
+/*
+ * Polo design system — "White canvas. Primary color. Real physics."
+ *
+ * R1  Color belongs to the game: chrome is ink/white/wash; saturated = playable.
+ * R2  Outline means touchable: 2px ink outlines are reserved for interactive things.
+ * R3  Motion is physical: springs and press-depth, never vague fades.
+ * R4  Numbers are instruments: every score/round/streak is mono + tabular.
+ */
+@theme {
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-display: "Unbounded", var(--font-sans);
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-paper: #ffffff;
+  --color-ink: #111116;
+  --color-mut: #6e6f78;
+  --color-line: #e8e8ee;
+  --color-wash: #f6f6f8;
+
+  --color-play-red: #ff4b3e;
+  --color-play-yellow: #ffc400;
+  --color-play-blue: #2d6cf6;
+  --color-play-green: #1fbf66;
+
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #ffffff;
+  color: #111116;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background-color: #ffc400;
+  color: #111116;
+}
+
+:focus-visible {
+  outline: 3px solid #2d6cf6;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Physical press button — pill shape (Chroma) + press depth (Playbox).
+   The hover/active transforms are the same curve the haptics will map to. */
+.btn-press {
+  border: 2px solid var(--color-ink);
+  border-radius: 999px;
+  box-shadow: 0 4px 0 var(--color-ink);
+  transition: transform 0.09s ease, box-shadow 0.09s ease;
+}
+.btn-press:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 var(--color-ink);
+}
+.btn-press:active {
+  transform: translateY(4px);
+  box-shadow: 0 0 0 var(--color-ink);
+}
+.btn-press:disabled {
+  transform: none;
+  box-shadow: 0 4px 0 var(--color-line);
+  border-color: var(--color-line);
+  color: var(--color-mut);
+  cursor: not-allowed;
+}
+
+/* Range sliders (Color Mixer): fat track, ink-ringed physical thumb */
+input[type="range"].polo-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 26px;
+  border-radius: 999px;
+  border: 2px solid var(--color-ink);
+  cursor: ew-resize;
+}
+input[type="range"].polo-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid var(--color-ink);
+  box-shadow: 0 3px 0 var(--color-ink);
+  cursor: grab;
+}
+input[type="range"].polo-range:active::-webkit-slider-thumb {
+  cursor: grabbing;
+  box-shadow: 0 1px 0 var(--color-ink);
+}
+input[type="range"].polo-range::-moz-range-thumb {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid var(--color-ink);
+  box-shadow: 0 3px 0 var(--color-ink);
+  cursor: grab;
+}
+
+/* Loader: the identity mark playing musical chairs */
+.polo-loader {
+  position: relative;
+  width: 56px;
+  height: 56px;
+}
+.polo-loader i {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 25px;
+  height: 25px;
+  border-radius: 7px;
+}
+.polo-loader i:nth-child(1) { background: var(--color-play-red); }
+.polo-loader i:nth-child(2) { background: var(--color-play-yellow); }
+.polo-loader i:nth-child(3) { background: var(--color-play-blue); }
+.polo-loader i:nth-child(4) { background: var(--color-play-green); }
+@media (prefers-reduced-motion: no-preference) {
+  .polo-loader i { animation: polo-seat 2.4s infinite; }
+  .polo-loader i:nth-child(2) { animation-delay: -0.6s; }
+  .polo-loader i:nth-child(3) { animation-delay: -1.2s; }
+  .polo-loader i:nth-child(4) { animation-delay: -1.8s; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .polo-loader i:nth-child(2) { transform: translate(31px, 0); }
+  .polo-loader i:nth-child(3) { transform: translate(31px, 31px); }
+  .polo-loader i:nth-child(4) { transform: translate(0, 31px); }
+}
+@keyframes polo-seat {
+  0%, 13%   { transform: translate(0, 0);       animation-timing-function: var(--ease-spring); }
+  25%, 38%  { transform: translate(31px, 0);    animation-timing-function: var(--ease-spring); }
+  50%, 63%  { transform: translate(31px, 31px); animation-timing-function: var(--ease-spring); }
+  75%, 88%  { transform: translate(0, 31px);    animation-timing-function: var(--ease-spring); }
+  100%      { transform: translate(0, 0); }
+}
+
+/* Countdown: digits stamp down like a press */
+@media (prefers-reduced-motion: no-preference) {
+  .polo-stamp { animation: polo-stamp 0.55s var(--ease-spring); }
+}
+@keyframes polo-stamp {
+  0%   { transform: scale(1.65); opacity: 0; }
+  45%  { transform: scale(0.9); opacity: 1; }
+  70%  { transform: scale(1.07); }
+  100% { transform: scale(1); }
+}
+
+/* Countdown charge bar drains one beat */
+@media (prefers-reduced-motion: no-preference) {
+  .polo-drain { animation: polo-drain 0.86s linear forwards; }
+}
+@keyframes polo-drain {
+  from { width: 100%; }
+  to   { width: 0%; }
+}
+
+/* Home tile: spring hover lift with a hard under-shadow */
+.tile-press {
+  transition:
+    transform 0.18s var(--ease-spring),
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.tile-press:hover {
+  border-color: var(--color-ink);
+  transform: translateY(-3px) rotate(-0.4deg);
+  box-shadow: 0 6px 0 -2px var(--color-ink);
+}
+.tile-press:active {
+  transform: translateY(2px);
+  box-shadow: 0 0 0 var(--color-ink);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tile-press:hover .tile-glyph { animation: polo-gbounce 0.5s var(--ease-spring); }
+}
+@keyframes polo-gbounce {
+  0%   { transform: translateY(0); }
+  40%  { transform: translateY(-6px); }
+  70%  { transform: translateY(1px); }
+  100% { transform: translateY(0); }
+}
+
+/* Grid cell hover pop for color grids */
+.cell-pop {
+  transition: transform 0.16s var(--ease-spring), box-shadow 0.16s ease;
+}
+.cell-pop:hover { transform: scale(1.06); }
+.cell-pop:active { transform: scale(0.95); }
