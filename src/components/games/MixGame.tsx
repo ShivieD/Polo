@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { MixRoundData } from "../../types";
 import { setupMixRound } from "../../utils/gameLogic";
 import { hslToCss, getScoreForColors } from "../../utils/color";
-import { GameHead, Ready, VerdictHead, VerdictBody, Btn } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn } from "../ui/Kit";
 import { MixGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -20,12 +20,13 @@ interface GameProps {
 }
 
 export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
-  const [stage, setStage] = useState<"getReady" | "stimulus" | "answer" | "reveal">("getReady");
+  const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundData, setRoundData] = useState<MixRoundData>(() => setupMixRound());
   const [round, setRound] = useState(1);
   const [countdown, setCountdown] = useState<number>(5);
   const autoAdvanceTimer = useRef<number | null>(null);
 
+  /* Next run goes straight to the countdown — no detour to instructions */
   const handleNextRound = () => {
     if (autoAdvanceTimer.current) {
       clearTimeout(autoAdvanceTimer.current);
@@ -33,7 +34,7 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
     }
     setRoundData(setupMixRound());
     setRound((r) => r + 1);
-    setStage("getReady");
+    setStage("countdown");
     setCountdown(5);
   };
 
@@ -47,7 +48,6 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   useEffect(() => {
     if (stage === "reveal") {
       playRevealInterval();
-      onResult?.((roundData.score ?? 0) >= 75);
 
       const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
       const timer = setTimeout(handleNextRound, 5000);
@@ -63,6 +63,7 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const handleDone = () => {
     if (stage !== "answer") return;
     const finalScore = getScoreForColors(roundData.targetColor, roundData.userColor);
+    onResult?.(finalScore >= 75); // record the result once, at answer time
     setRoundData((prev) => ({ ...prev, score: finalScore }));
     setStage("reveal");
   };
@@ -143,6 +144,8 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
           />
         )}
 
+        {stage === "countdown" && <Countdown onComplete={() => setStage("stimulus")} />}
+
         {stage === "stimulus" && (
           <motion.div
             initial={{ opacity: 0, scale: 0.92 }}
@@ -186,8 +189,14 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center gap-8">
-            <VerdictHead id="mix-reveal-verdict" ok={score >= 75} headline={verdictHead} />
+          <div className="flex flex-col items-center gap-7">
+            <VerdictHead
+              id="mix-reveal-verdict"
+              ok={score >= 75}
+              headline={verdictHead}
+              score={String(score)}
+              scoreCaption="Match / 100"
+            />
 
             {/* Target vs yours, side by side, seam shared */}
             <div className="flex items-stretch">
@@ -209,15 +218,12 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
               </div>
             </div>
 
-            <VerdictBody
-              id="mix-reveal-score"
-              detail={verdictDetail}
-              score={String(score)}
-              scoreCaption="Match / 100"
-              nextIn={countdown}
-            />
+            <VerdictBody id="mix-reveal-score" detail={verdictDetail} />
 
-            <Btn id="mix-next-btn" variant="secondary" onClick={handleNextRound}>Next color</Btn>
+            <div className="flex flex-col items-center gap-4">
+              <Btn id="mix-next-btn" variant="secondary" onClick={handleNextRound}>Next color</Btn>
+              <NextIn seconds={countdown} />
+            </div>
           </div>
         )}
       </div>

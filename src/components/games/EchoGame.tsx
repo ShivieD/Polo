@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { EchoRoundData } from "../../types";
 import { setupEchoRound, getEchoParams } from "../../utils/gameLogic";
 import { hslToCss, HSL } from "../../utils/color";
-import { GameHead, Ready, VerdictHead, VerdictBody, Btn, Wobble } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, Wobble } from "../ui/Kit";
 import { EchoGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -29,7 +29,7 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const [level, setLevel] = useState<number>(() => streak ?? 0);
   const params = getEchoParams(level);
 
-  const [stage, setStage] = useState<"getReady" | "stimulus" | "answer" | "reveal">("getReady");
+  const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundData, setRoundData] = useState<EchoRoundData>(() => setupEchoRound(getEchoParams(streak ?? 0)));
   const [round, setRound] = useState(1);
   const [activeStimulusIndex, setActiveStimulusIndex] = useState<number>(-1);
@@ -42,6 +42,7 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
     timers.current = [];
   };
 
+  /* Next run goes straight to the countdown — no detour to instructions */
   const handleNextRound = () => {
     clearTimers();
     const nextLevel = roundData.isCorrect ? level + 1 : 0;
@@ -50,7 +51,7 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
     setRound((r) => r + 1);
     setActiveStimulusIndex(-1);
     setReplayIndex(-1);
-    setStage("getReady");
+    setStage("countdown");
     setCountdown(5);
   };
 
@@ -84,7 +85,6 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   useEffect(() => {
     if (stage === "reveal") {
       playRevealInterval();
-      onResult?.(!!roundData.isCorrect);
 
       const { speed } = params;
       roundData.sequence.forEach((padId, i) => {
@@ -124,6 +124,7 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
 
     if (updatedTaps.length === params.seqLen) {
       const isCorrect = updatedTaps.join(",") === roundData.sequence.join(",");
+      onResult?.(isCorrect); // record the result once, at answer time
       setRoundData((prev) => ({ ...prev, isCorrect }));
       setStage("reveal");
     }
@@ -185,6 +186,8 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
             onComplete={() => setStage("stimulus")}
           />
         )}
+
+        {stage === "countdown" && <Countdown onComplete={() => setStage("stimulus")} />}
 
         {stage === "stimulus" && (
           <div className="flex flex-col items-center gap-7">
@@ -248,7 +251,7 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center gap-8">
+          <div className="flex flex-col items-center gap-7">
             <VerdictHead
               id="echo-reveal-verdict"
               ok={!!roundData.isCorrect}
@@ -299,10 +302,12 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
                   ? `You played the pattern back exactly. Level ${level + 2} will push harder.`
                   : "Green is the correct order, ink is yours. Watch the replay."
               }
-              nextIn={countdown}
             />
 
-            <Btn id="echo-next-btn" variant="secondary" onClick={handleNextRound}>Next pattern</Btn>
+            <div className="flex flex-col items-center gap-4">
+              <Btn id="echo-next-btn" variant="secondary" onClick={handleNextRound}>Next pattern</Btn>
+              <NextIn seconds={countdown} />
+            </div>
           </div>
         )}
       </div>

@@ -170,18 +170,25 @@ export const Countdown: React.FC<{ onComplete: () => void; label?: string }> = (
 /* ------------------------------------------------------------------ */
 
 /* Numbered timeline — circled step numbers joined by a vertical line,
-   with one instruction per step beside it */
+   with one instruction per step beside it. The connector is drawn per-step
+   (a flex-grow segment in each circle's column) so it always ends exactly
+   at the last circle, no matter how far the final step's text wraps. */
 export const StepsTimeline: React.FC<{ steps: string[]; className?: string }> = ({ steps, className = "" }) => (
-  <ol className={`relative flex flex-col gap-6 text-left ${className}`}>
-    {steps.length > 1 && <i aria-hidden="true" className="absolute left-[15px] top-4 bottom-4 w-[2px] bg-ink" />}
-    {steps.map((step, i) => (
-      <li key={i} className="relative flex items-start gap-4">
-        <span className="w-8 h-8 shrink-0 rounded-full border-2 border-ink bg-paper font-mono font-extrabold text-[13px] flex items-center justify-center tabular-nums z-10">
-          {i + 1}
-        </span>
-        <span className="text-[16px] text-ink leading-relaxed pt-[3px]">{step}</span>
-      </li>
-    ))}
+  <ol className={`flex flex-col text-left ${className}`}>
+    {steps.map((step, i) => {
+      const last = i === steps.length - 1;
+      return (
+        <li key={i} className={`flex gap-4 ${last ? "" : "pb-6"}`}>
+          <div className="flex flex-col items-center self-stretch">
+            <span className="w-8 h-8 shrink-0 rounded-full border-2 border-ink bg-paper font-mono font-extrabold text-[13px] flex items-center justify-center tabular-nums">
+              {i + 1}
+            </span>
+            {!last && <span aria-hidden="true" className="w-[2px] grow bg-ink" />}
+          </div>
+          <span className="text-[16px] text-ink leading-relaxed pt-[3px]">{step}</span>
+        </li>
+      );
+    })}
   </ol>
 );
 
@@ -217,19 +224,23 @@ export const Ready: React.FC<{
 /* Verdict — the moment after an answer. Pops in with verdict weight   */
 /* ------------------------------------------------------------------ */
 
-/* The verdict is split in two: the pill + headline stamp in ABOVE the
-   result board, while the explanation, countdown and CTA rest below it. */
+/* The verdict is split so the result board can sit in the middle:
+   VerdictHead (pill + headline + score) stamps in ABOVE the board,
+   VerdictBody (the explanation) sits below it, and NextIn (the countdown)
+   goes under the CTA. */
 export const VerdictHead: React.FC<{
   ok: boolean;
   headline: string;
+  score?: string;
+  scoreCaption?: string;
   id?: string;
-}> = ({ ok, headline, id }) => (
+}> = ({ ok, headline, score, scoreCaption, id }) => (
   <motion.div
     id={id}
     initial={{ scale: 1.35, opacity: 0 }}
     animate={{ scale: 1, opacity: 1 }}
     transition={{ type: "spring", stiffness: 380, damping: 22 }}
-    className="flex flex-col items-center text-center gap-3"
+    className="flex flex-col items-center text-center"
   >
     <span
       className={`font-mono font-extrabold text-[11px] tracking-[0.16em] uppercase px-3.5 py-1.5 rounded-full ${
@@ -238,37 +249,33 @@ export const VerdictHead: React.FC<{
     >
       {ok ? "Correct!" : "Miss"}
     </span>
-    <h3 className="font-display font-extrabold text-xl sm:text-2xl tracking-tight text-ink">{headline}</h3>
+    <h3 className="font-display font-extrabold text-xl sm:text-2xl tracking-tight text-ink mt-3">{headline}</h3>
+    {score !== undefined && (
+      <div className="font-mono font-extrabold text-6xl leading-none tabular-nums text-ink mt-5">{score}</div>
+    )}
+    {scoreCaption && (
+      <div className="font-mono font-medium text-[11px] tracking-[0.16em] uppercase text-mut mt-2">{scoreCaption}</div>
+    )}
   </motion.div>
 );
 
-export const VerdictBody: React.FC<{
-  detail: string;
-  score?: string;
-  scoreCaption?: string;
-  nextIn?: number;
-  id?: string;
-}> = ({ detail, score, scoreCaption, nextIn, id }) => (
-  <motion.div
+export const VerdictBody: React.FC<{ detail: string; id?: string }> = ({ detail, id }) => (
+  <motion.p
     id={id}
     initial={{ opacity: 0, y: 10 }}
     animate={{ opacity: 1, y: 0 }}
     transition={{ type: "spring", stiffness: 340, damping: 24, delay: 0.08 }}
-    className="flex flex-col items-center text-center gap-1"
+    className="text-[15px] text-mut max-w-sm leading-relaxed text-center"
   >
-    {score !== undefined && (
-      <div className="font-mono font-extrabold text-6xl leading-none tabular-nums text-ink">{score}</div>
-    )}
-    {scoreCaption && (
-      <div className="font-mono font-medium text-[11px] tracking-[0.16em] uppercase text-mut mt-1">{scoreCaption}</div>
-    )}
-    <p className={`text-[15px] text-mut max-w-sm leading-relaxed ${score !== undefined ? "mt-3" : ""}`}>{detail}</p>
-    {nextIn !== undefined && (
-      <span className="font-mono font-medium text-[12px] tracking-[0.14em] uppercase text-mut mt-3 tabular-nums">
-        Next round in {nextIn}s
-      </span>
-    )}
-  </motion.div>
+    {detail}
+  </motion.p>
+);
+
+/* The auto-advance countdown line — lives under the CTA */
+export const NextIn: React.FC<{ seconds: number }> = ({ seconds }) => (
+  <span className="font-mono font-medium text-[12px] tracking-[0.14em] uppercase text-mut tabular-nums">
+    Next round in {seconds}s
+  </span>
 );
 
 /* Streak dots — session progress, green = done */

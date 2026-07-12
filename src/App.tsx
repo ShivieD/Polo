@@ -58,8 +58,8 @@ const gamesList = [
   },
   {
     id: "tally" as GameId,
-    name: "Count the Dots",
-    oneLiner: "Count the dots before they vanish. They get faster.",
+    name: "Count it all",
+    oneLiner: "Count the pieces before they vanish — dots first, then shapes.",
     accent: "#ff4b3e",
     glyph: <TallyGlyph />,
   },
@@ -75,6 +75,7 @@ interface Flood {
 type StreakMap = Partial<Record<GameId, number>>;
 
 const STREAKS_KEY = "polo-streaks";
+const PLAYED_KEY = "polo-played";
 
 const loadStreaks = (): StreakMap => {
   try {
@@ -84,10 +85,20 @@ const loadStreaks = (): StreakMap => {
   }
 };
 
+/* Which instruments the player has completed at least one round of. Persisted
+   so the "instruments done" tally survives a reload (played once = done). */
+const loadPlayed = (): Set<GameId> => {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(PLAYED_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+};
+
 export default function App() {
   const [activeGame, setActiveGame] = useState<GameId | null>(null);
   const [soundOn, setSoundOn] = useState(true);
-  const [doneSet, setDoneSet] = useState<Set<GameId>>(new Set());
+  const [played, setPlayed] = useState<Set<GameId>>(loadPlayed);
   const [streaks, setStreaks] = useState<StreakMap>(loadStreaks);
   const [flood, setFlood] = useState<Flood | null>(null);
 
@@ -123,12 +134,18 @@ export default function App() {
   };
 
   /* Games report each round: correct answers grow that game's streak,
-     a miss resets it. Streaks survive reloads via localStorage. */
+     a miss resets it, and either way the game is marked played. Both survive
+     reloads via localStorage. */
   const reportResult = (id: GameId, correct: boolean) => {
-    setDoneSet((prev) => {
+    setPlayed((prev) => {
       if (prev.has(id)) return prev;
       const next = new Set(prev);
       next.add(id);
+      try {
+        localStorage.setItem(PLAYED_KEY, JSON.stringify([...next]));
+      } catch {
+        /* storage unavailable — played set stays session-only */
+      }
       return next;
     });
     setStreaks((prev) => {
@@ -159,7 +176,7 @@ export default function App() {
             <PoloMark />
             <span className="font-display font-extrabold text-[17px] tracking-[0.02em]">POLO</span>
             <div className="ml-auto flex items-center gap-5">
-              {!activeGame && <Streak total={gamesList.length} done={doneSet.size} className="hidden sm:flex" />}
+              {!activeGame && <Streak total={gamesList.length} done={played.size} className="hidden sm:flex" />}
               <button
                 id="sound-toggle-btn"
                 onClick={handleToggleSound}
@@ -184,7 +201,7 @@ export default function App() {
                     Train your eye.
                   </h1>
                   <span className="relative font-mono font-medium text-[12px] tracking-[0.2em] uppercase text-mut tabular-nums">
-                    Daily drill · <b className="text-ink font-extrabold">{doneSet.size} of {gamesList.length}</b> instruments done
+                    Daily drill · <b className="text-ink font-extrabold">{played.size} of {gamesList.length}</b> instruments done
                   </span>
                 </div>
 

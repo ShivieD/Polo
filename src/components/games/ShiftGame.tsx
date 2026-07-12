@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { ShiftRoundData } from "../../types";
 import { setupShiftRound } from "../../utils/gameLogic";
 import { hslToCss } from "../../utils/color";
-import { GameHead, Ready, VerdictHead, VerdictBody, Btn, Loader, Wobble } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, Loader, Wobble } from "../ui/Kit";
 import { ShiftGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -19,7 +19,7 @@ interface GameProps {
   streak?: number;
 }
 
-type ShiftStage = "getReady" | "stimulus" | "interstitial" | "answer" | "reveal";
+type ShiftStage = "getReady" | "countdown" | "stimulus" | "interstitial" | "answer" | "reveal";
 
 export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const [stage, setStage] = useState<ShiftStage>("getReady");
@@ -28,6 +28,7 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
   const [countdown, setCountdown] = useState<number>(5);
   const autoAdvanceTimer = useRef<number | null>(null);
 
+  /* Next run goes straight to the countdown — no detour to instructions */
   const handleNextRound = () => {
     if (autoAdvanceTimer.current) {
       clearTimeout(autoAdvanceTimer.current);
@@ -35,7 +36,7 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
     }
     setRoundData(setupShiftRound());
     setRound((r) => r + 1);
-    setStage("getReady");
+    setStage("countdown");
     setCountdown(5);
   };
 
@@ -55,7 +56,6 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
   useEffect(() => {
     if (stage === "reveal") {
       playRevealInterval();
-      onResult?.(isUserCorrect);
 
       const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
       const timer = setTimeout(handleNextRound, 5000);
@@ -72,6 +72,7 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
     if (stage !== "answer") return;
     playTick();
     triggerHaptic();
+    onResult?.(idx === roundData.shiftedIndex); // record the result once, at answer time
     setRoundData((prev) => ({ ...prev, userSelection: idx }));
     setStage("reveal");
   };
@@ -100,6 +101,8 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
             onComplete={() => setStage("stimulus")}
           />
         )}
+
+        {stage === "countdown" && <Countdown onComplete={() => setStage("stimulus")} />}
 
         {stage === "stimulus" && (
           <motion.div
@@ -154,7 +157,7 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center gap-8">
+          <div className="flex flex-col items-center gap-7">
             <VerdictHead
               id="shift-reveal-verdict"
               ok={isUserCorrect}
@@ -240,10 +243,12 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
                   ? "You caught the changed block dead on. Compare before and after to see the drift."
                   : "Compare before and after — the block that changed is tagged Correct."
               }
-              nextIn={countdown}
             />
 
-            <Btn id="shift-next-btn" variant="secondary" onClick={handleNextRound}>Next grid</Btn>
+            <div className="flex flex-col items-center gap-4">
+              <Btn id="shift-next-btn" variant="secondary" onClick={handleNextRound}>Next grid</Btn>
+              <NextIn seconds={countdown} />
+            </div>
           </div>
         )}
       </div>
