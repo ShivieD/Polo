@@ -84,9 +84,9 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
       return false;
     }
   });
-  /* Once shapes are unlocked, the game opens on the mode picker (a one-time
-     sub-page); otherwise it opens on the instructions. */
-  const [stage, setStage] = useState<TallyStage>(shapesUnlocked ? "modePick" : "getReady");
+  /* The game always opens on the instructions. From there, unlocked players
+     go to the mode picker; everyone else drops straight into a dots run. */
+  const [stage, setStage] = useState<TallyStage>("getReady");
   const [justUnlocked, setJustUnlocked] = useState(false);
   const [dotsRun, setDotsRun] = useState<number>(1);
   const [shapesRun, setShapesRun] = useState<number>(1);
@@ -201,6 +201,20 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
   };
 
   const targetLabel = roundData.targetShape ? `${roundData.targetShape}s` : "pieces";
+
+  /* Instructions shown on entry — always, before either flow */
+  const readySteps = shapesUnlocked
+    ? [
+        "Pieces drop onto the board one by one.",
+        "Count them as they land, then pick how many.",
+        "On the next screen, choose Dots or Shapes to count.",
+      ]
+    : [
+        "Pieces drop onto the board one by one.",
+        "Count them as they land.",
+        "Pick how many landed — correct runs get faster and busier.",
+        `Conquer a board of ${UNLOCK_AT}+ to unlock shape counting.`,
+      ];
 
   const status =
     stage === "stimulus" ? "Count them" :
@@ -318,21 +332,11 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
         {stage === "getReady" && (
           <Ready
             name="Count it all"
-            steps={
-              dotsRun === 1
-                ? [
-                    "Pieces drop onto the board one by one.",
-                    "Count them as they land.",
-                    "Pick how many landed — correct runs get faster and busier.",
-                    `Conquer a board of ${UNLOCK_AT}+ to unlock shape counting.`,
-                  ]
-                : [
-                    `Run ${dotsRun} — faster and busier. Keep counting.`,
-                    `Conquer a board of ${UNLOCK_AT}+ to unlock shape counting.`,
-                  ]
-            }
+            steps={readySteps}
+            ctaLabel={shapesUnlocked ? "Choose mode" : "Start round"}
+            immediate={shapesUnlocked}
             glyph={<span className="scale-150 inline-block"><TallyGlyph /></span>}
-            onComplete={() => setStage("stimulus")}
+            onComplete={() => setStage(shapesUnlocked ? "modePick" : "stimulus")}
           />
         )}
 
