@@ -169,22 +169,23 @@ export const Countdown: React.FC<{ onComplete: () => void; label?: string }> = (
 /* Ready screen — instructions, then Start round → Countdown           */
 /* ------------------------------------------------------------------ */
 
-/* Numbered timeline — circled step numbers joined by a vertical line,
-   with one instruction per step beside it. The connector is drawn per-step
-   (a flex-grow segment in each circle's column) so it always ends exactly
-   at the last circle, no matter how far the final step's text wraps. */
+/* Numbered timeline — circled step numbers joined by a single vertical line,
+   one instruction per step beside it. Each step (except the last) draws a
+   connector from its own circle down to the next circle, anchored to the
+   row's box edges rather than to flex height — so the line is continuous and
+   the same on every screen no matter how far any step's text wraps. There is
+   no line above the first circle or below the last. */
 export const StepsTimeline: React.FC<{ steps: string[]; className?: string }> = ({ steps, className = "" }) => (
   <ol className={`flex flex-col text-left ${className}`}>
     {steps.map((step, i) => {
       const last = i === steps.length - 1;
       return (
-        <li key={i} className={`flex gap-4 ${last ? "" : "pb-6"}`}>
-          <div className="flex flex-col items-center self-stretch">
-            <span className="w-8 h-8 shrink-0 rounded-full border-2 border-ink bg-paper font-mono font-extrabold text-[13px] flex items-center justify-center tabular-nums">
-              {i + 1}
-            </span>
-            {!last && <span aria-hidden="true" className="w-[2px] grow bg-ink" />}
-          </div>
+        <li key={i} className={`relative flex gap-4 ${last ? "" : "pb-7"}`}>
+          {/* connector: circle-bottom (top-8 = circle height) → next circle-top (li bottom edge) */}
+          {!last && <span aria-hidden="true" className="absolute left-[15px] top-8 bottom-0 w-[2px] bg-ink" />}
+          <span className="relative z-10 w-8 h-8 shrink-0 rounded-full border-2 border-ink bg-paper font-mono font-extrabold text-[13px] flex items-center justify-center tabular-nums">
+            {i + 1}
+          </span>
           <span className="text-[16px] text-ink leading-relaxed pt-[3px]">{step}</span>
         </li>
       );
@@ -197,7 +198,11 @@ export const Ready: React.FC<{
   steps: string[];
   glyph?: React.ReactNode;
   onComplete: () => void;
-}> = ({ name, steps, glyph, onComplete }) => {
+  ctaLabel?: string;
+  /* When true the CTA fires onComplete directly, skipping the countdown —
+     used when the next screen is another choice (e.g. the mode picker). */
+  immediate?: boolean;
+}> = ({ name, steps, glyph, onComplete, ctaLabel = "Start round", immediate = false }) => {
   const [counting, setCounting] = useState(false);
 
   if (counting) return <Countdown onComplete={onComplete} />;
@@ -213,8 +218,8 @@ export const Ready: React.FC<{
       {glyph && <div className="mb-7 flex justify-center">{glyph}</div>}
       <h2 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-ink mb-7">{name}</h2>
       <StepsTimeline steps={steps} className="max-w-sm mb-10" />
-      <Btn id="get-ready-start-btn" onClick={() => setCounting(true)}>
-        Start round
+      <Btn id="get-ready-start-btn" onClick={() => (immediate ? onComplete() : setCounting(true))}>
+        {ctaLabel}
       </Btn>
     </motion.div>
   );
