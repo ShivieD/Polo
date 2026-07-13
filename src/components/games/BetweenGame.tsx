@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { BetweenRoundData } from "../../types";
 import { setupBetweenRound, interpolateHsl } from "../../utils/gameLogic";
 import { hslToCss } from "../../utils/color";
-import { GameHead, Panel, Ready, VerdictHead, VerdictBody, Btn } from "../ui/Kit";
+import { GameHead, Panel, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn } from "../ui/Kit";
 import { BetweenGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -20,13 +20,14 @@ interface GameProps {
 }
 
 export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
-  const [stage, setStage] = useState<"getReady" | "stimulus" | "answer" | "reveal">("getReady");
+  const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundData, setRoundData] = useState<BetweenRoundData>(() => setupBetweenRound());
   const [round, setRound] = useState(1);
   const [countdown, setCountdown] = useState<number>(5);
   const autoAdvanceTimer = useRef<number | null>(null);
   const isDragging = useRef(false);
 
+  /* Next run goes straight to the countdown — no detour to instructions */
   const handleNextRound = () => {
     if (autoAdvanceTimer.current) {
       clearTimeout(autoAdvanceTimer.current);
@@ -34,7 +35,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
     }
     setRoundData(setupBetweenRound());
     setRound((r) => r + 1);
-    setStage("getReady");
+    setStage("countdown");
     setCountdown(5);
   };
 
@@ -48,7 +49,6 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
   useEffect(() => {
     if (stage === "reveal") {
       playRevealInterval();
-      onResult?.((roundData.score ?? 0) >= 85);
 
       const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
       const timer = setTimeout(handleNextRound, 5000);
@@ -90,6 +90,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
   const handleDone = () => {
     if (stage !== "answer") return;
     const score = Math.round(100 * (1 - Math.abs(roundData.guessPosition - roundData.truePosition)));
+    onResult?.(score >= 85); // record the result once, at answer time
     setRoundData((prev) => ({ ...prev, score }));
     setStage("reveal");
   };
@@ -137,6 +138,8 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
             onComplete={() => setStage("stimulus")}
           />
         )}
+
+        {stage === "countdown" && <Countdown onComplete={() => setStage("stimulus")} />}
 
         {stage === "stimulus" && (
           <motion.div
@@ -198,7 +201,13 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
 
         {stage === "reveal" && (
           <div className="flex flex-col items-center w-full gap-6">
-            <VerdictHead id="between-reveal-verdict" ok={score >= 85} headline={verdictHead} />
+            <VerdictHead
+              id="between-reveal-verdict"
+              ok={score >= 85}
+              headline={verdictHead}
+              score={String(score)}
+              scoreCaption="Accuracy / 100"
+            />
 
             {/* Gradient with staggered pins: Correct above, Your below — the
                 tags can never collide, even on a perfect guess */}
@@ -231,15 +240,12 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
               </div>
             </div>
 
-            <VerdictBody
-              id="between-reveal-score"
-              detail={verdictDetail}
-              score={String(score)}
-              scoreCaption="Accuracy / 100"
-              nextIn={countdown}
-            />
+            <VerdictBody id="between-reveal-score" detail={verdictDetail} />
 
-            <Btn id="between-next-btn" variant="secondary" onClick={handleNextRound}>Next color</Btn>
+            <div className="flex flex-col items-center gap-4">
+              <Btn id="between-next-btn" variant="secondary" onClick={handleNextRound}>Next color</Btn>
+              <NextIn seconds={countdown} />
+            </div>
           </div>
         )}
       </div>

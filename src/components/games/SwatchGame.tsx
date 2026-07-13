@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { SwatchRoundData } from "../../types";
 import { setupSwatchRound } from "../../utils/gameLogic";
 import { hslToCss, HSL } from "../../utils/color";
-import { GameHead, Ready, VerdictHead, VerdictBody, Btn, Wobble } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, Wobble } from "../ui/Kit";
 import { SwatchGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -20,12 +20,13 @@ interface GameProps {
 }
 
 export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
-  const [stage, setStage] = useState<"getReady" | "stimulus" | "answer" | "reveal">("getReady");
+  const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundData, setRoundData] = useState<SwatchRoundData>(() => setupSwatchRound());
   const [round, setRound] = useState(1);
   const [countdown, setCountdown] = useState<number>(4);
   const autoAdvanceTimer = useRef<number | null>(null);
 
+  /* Next run goes straight to the countdown — no detour to instructions */
   const handleNextRound = () => {
     if (autoAdvanceTimer.current) {
       clearTimeout(autoAdvanceTimer.current);
@@ -33,7 +34,7 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =>
     }
     setRoundData(setupSwatchRound());
     setRound((r) => r + 1);
-    setStage("getReady");
+    setStage("countdown");
     setCountdown(4);
   };
 
@@ -55,7 +56,6 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =>
   useEffect(() => {
     if (stage === "reveal") {
       playRevealInterval();
-      onResult?.(isUserCorrect);
 
       const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
       const timer = setTimeout(handleNextRound, 4000);
@@ -72,6 +72,7 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =>
     if (stage !== "answer") return;
     playTick();
     triggerHaptic();
+    onResult?.(option.isCorrect); // record the result once, at answer time
     setRoundData((prev) => ({ ...prev, userSelection: option.color }));
     setStage("reveal");
   };
@@ -99,6 +100,8 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =>
             onComplete={() => setStage("stimulus")}
           />
         )}
+
+        {stage === "countdown" && <Countdown onComplete={() => setStage("stimulus")} />}
 
         {stage === "stimulus" && (
           <motion.div
@@ -142,7 +145,7 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =>
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center gap-8">
+          <div className="flex flex-col items-center gap-7">
             <VerdictHead
               id="swatch-reveal-verdict"
               ok={isUserCorrect}
@@ -197,10 +200,12 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =>
                   ? "You picked the exact specimen from the lineup."
                   : "The correct color is ringed in ink — compare it against your pick."
               }
-              nextIn={countdown}
             />
 
-            <Btn id="swatch-next-btn" variant="secondary" onClick={handleNextRound}>Next color</Btn>
+            <div className="flex flex-col items-center gap-4">
+              <Btn id="swatch-next-btn" variant="secondary" onClick={handleNextRound}>Next color</Btn>
+              <NextIn seconds={countdown} />
+            </div>
           </div>
         )}
       </div>
