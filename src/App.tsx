@@ -5,6 +5,7 @@
 
 import React, { Suspense, lazy, useState } from "react";
 import { motion, MotionConfig } from "motion/react";
+import { Analytics } from "@vercel/analytics/react";
 import { GameId } from "./types";
 import { toggleSound, playTick, triggerHaptic } from "./utils/audio";
 import { PoloMark, SwatchGlyph, MixGlyph, EchoGlyph, BetweenGlyph, ShiftGlyph, TallyGlyph } from "./components/ui/Glyphs";
@@ -296,6 +297,7 @@ export default function App() {
           />
         )}
       </div>
+      <Analytics />
     </MotionConfig>
   );
 }
