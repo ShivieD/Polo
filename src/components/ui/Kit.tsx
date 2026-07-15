@@ -69,7 +69,12 @@ export const GameHead: React.FC<{
   onBack: () => void;
   streak?: number;
   id?: string;
-}> = ({ title, status, onBack, streak, id }) => (
+  /* Shapes mode: greyscale chrome — the streak chip trades yellow for ink */
+  mono?: boolean;
+  /* Shapes mode: the in-session level marker, top-right. Soft opacity fade
+     when it advances — no celebration. */
+  level?: number;
+}> = ({ title, status, onBack, streak, id, mono = false, level }) => (
   <div id={id} className="flex items-center gap-4 flex-wrap mb-8">
     <BackBtn onClick={onBack} />
     <h2 className="font-display font-extrabold text-xl sm:text-2xl tracking-tight text-ink">{title}</h2>
@@ -77,7 +82,9 @@ export const GameHead: React.FC<{
       {typeof streak === "number" && streak > 0 && (
         <span
           id="game-streak-chip"
-          className="font-mono font-extrabold text-[11px] tracking-[0.1em] uppercase bg-play-yellow text-ink rounded-full px-2.5 py-1 tabular-nums"
+          className={`font-mono font-extrabold text-[11px] tracking-[0.1em] uppercase rounded-full px-2.5 py-1 tabular-nums ${
+            mono ? "bg-ink text-paper" : "bg-play-yellow text-ink"
+          }`}
         >
           Streak {streak}
         </span>
@@ -85,6 +92,18 @@ export const GameHead: React.FC<{
       <span className="font-mono font-extrabold text-[12px] tracking-[0.1em] text-mut uppercase tabular-nums">
         {status}
       </span>
+      {typeof level === "number" && (
+        <motion.span
+          key={level}
+          id="game-level-marker"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5, ease: "easeOut" }}
+          className="font-mono font-extrabold text-[12px] tracking-[0.1em] text-ink uppercase tabular-nums"
+        >
+          L{level}
+        </motion.span>
+      )}
     </span>
   </div>
 );
@@ -104,9 +123,9 @@ export const Panel: React.FC<{ children: React.ReactNode; className?: string; id
 /* Loader — the identity mark playing musical chairs                   */
 /* ------------------------------------------------------------------ */
 
-export const Loader: React.FC<{ label?: string }> = ({ label }) => (
+export const Loader: React.FC<{ label?: string; mono?: boolean }> = ({ label, mono = false }) => (
   <div className="flex flex-col items-center gap-7">
-    <div className="polo-loader" role="img" aria-label="Loading">
+    <div className={`polo-loader ${mono ? "polo-loader-mono" : ""}`} role="img" aria-label="Loading">
       <i /><i /><i /><i />
     </div>
     {label && (
@@ -121,7 +140,11 @@ export const Loader: React.FC<{ label?: string }> = ({ label }) => (
 
 const BEAT_MS = 860;
 
-export const Countdown: React.FC<{ onComplete: () => void; label?: string }> = ({ onComplete, label = "Eyes ready" }) => {
+export const Countdown: React.FC<{ onComplete: () => void; label?: string; mono?: boolean }> = ({
+  onComplete,
+  label = "Eyes ready",
+  mono = false,
+}) => {
   const seq = ["3", "2", "1", "GO"];
   const [step, setStep] = useState(0);
   const done = useRef(false);
@@ -149,7 +172,7 @@ export const Countdown: React.FC<{ onComplete: () => void; label?: string }> = (
       <div
         key={step}
         className={`polo-stamp font-mono font-extrabold leading-none tabular-nums h-[100px] flex items-center ${
-          isGo ? "text-[64px] text-play-green" : "text-[96px] text-ink"
+          isGo ? `text-[64px] ${mono ? "text-ink" : "text-play-green"}` : "text-[96px] text-ink"
         }`}
       >
         {seq[step]}
@@ -157,7 +180,9 @@ export const Countdown: React.FC<{ onComplete: () => void; label?: string }> = (
       <div className="w-[156px] h-[13px] border-2 border-ink rounded-full overflow-hidden">
         <i
           key={step}
-          className={`block h-full ${isGo ? "bg-play-green w-full" : "bg-play-yellow polo-drain"}`}
+          className={`block h-full ${
+            isGo ? `w-full ${mono ? "bg-ink" : "bg-play-green"}` : `polo-drain ${mono ? "bg-ink" : "bg-play-yellow"}`
+          }`}
         />
       </div>
       <span className="font-mono font-extrabold text-[11px] tracking-[0.18em] text-mut uppercase">{label}</span>
@@ -202,10 +227,12 @@ export const Ready: React.FC<{
   /* When true the CTA fires onComplete directly, skipping the countdown —
      used when the next screen is another choice (e.g. the mode picker). */
   immediate?: boolean;
-}> = ({ name, steps, glyph, onComplete, ctaLabel = "Start round", immediate = false }) => {
+  /* Shapes mode: greyscale CTA and countdown */
+  mono?: boolean;
+}> = ({ name, steps, glyph, onComplete, ctaLabel = "Start round", immediate = false, mono = false }) => {
   const [counting, setCounting] = useState(false);
 
-  if (counting) return <Countdown onComplete={onComplete} />;
+  if (counting) return <Countdown onComplete={onComplete} mono={mono} />;
 
   return (
     <motion.div
@@ -218,7 +245,11 @@ export const Ready: React.FC<{
       {glyph && <div className="mb-7 flex justify-center">{glyph}</div>}
       <h2 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-ink mb-7">{name}</h2>
       <StepsTimeline steps={steps} className="max-w-sm mb-10" />
-      <Btn id="get-ready-start-btn" onClick={() => (immediate ? onComplete() : setCounting(true))}>
+      <Btn
+        id="get-ready-start-btn"
+        variant={mono ? "secondary" : "primary"}
+        onClick={() => (immediate ? onComplete() : setCounting(true))}
+      >
         {ctaLabel}
       </Btn>
     </motion.div>
@@ -239,7 +270,10 @@ export const VerdictHead: React.FC<{
   score?: string;
   scoreCaption?: string;
   id?: string;
-}> = ({ ok, headline, score, scoreCaption, id }) => (
+  /* Shapes mode: the verdict carried by weight instead of hue — solid ink
+     pill for a hit, dashed outline for a miss. */
+  mono?: boolean;
+}> = ({ ok, headline, score, scoreCaption, id, mono = false }) => (
   <motion.div
     id={id}
     initial={{ scale: 1.35, opacity: 0 }}
@@ -249,7 +283,13 @@ export const VerdictHead: React.FC<{
   >
     <span
       className={`font-mono font-extrabold text-[11px] tracking-[0.16em] uppercase px-3.5 py-1.5 rounded-full ${
-        ok ? "bg-play-green text-paper" : "bg-play-red text-paper"
+        mono
+          ? ok
+            ? "bg-ink text-paper"
+            : "bg-paper text-ink border-2 border-dashed border-mut"
+          : ok
+            ? "bg-play-green text-paper"
+            : "bg-play-red text-paper"
       }`}
     >
       {ok ? "Correct!" : "Miss"}

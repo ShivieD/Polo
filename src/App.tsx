@@ -6,9 +6,17 @@
 import React, { Suspense, lazy, useState } from "react";
 import { motion, MotionConfig } from "motion/react";
 import { Analytics } from "@vercel/analytics/react";
-import { GameId } from "./types";
+import { GameId, PlayMode, ShapeGameId } from "./types";
 import { toggleSound, playTick, triggerHaptic } from "./utils/audio";
 import { PoloMark, SwatchGlyph, MixGlyph, EchoGlyph, BetweenGlyph, ShiftGlyph, TallyGlyph } from "./components/ui/Glyphs";
+import {
+  FormGlyph,
+  TiltGlyph,
+  ChainGlyph,
+  SquircleGlyph,
+  ShapeShiftGlyph,
+  ShapeTallyGlyph,
+} from "./components/ui/ShapeGlyphs";
 import { Streak } from "./components/ui/Kit";
 
 import { SwatchGame } from "./components/games/SwatchGame";
@@ -17,48 +25,66 @@ import { EchoGame } from "./components/games/EchoGame";
 import { BetweenGame } from "./components/games/BetweenGame";
 import { ShiftGame } from "./components/games/ShiftGame";
 import { TallyGame } from "./components/games/TallyGame";
+import { FormGame } from "./components/games/FormGame";
+import { TiltGame } from "./components/games/TiltGame";
+import { ChainGame } from "./components/games/ChainGame";
+import { SquircleGame } from "./components/games/SquircleGame";
+import { ShapeShiftGame } from "./components/games/ShapeShiftGame";
+import { ShapeTallyGame } from "./components/games/ShapeTallyGame";
+import { Spectrum } from "./components/Spectrum";
 
 /* three.js is loaded lazily so the game itself never waits on it */
 const AmbientBlocks = lazy(() => import("./components/AmbientBlocks"));
 
-const gamesList = [
+interface Tile {
+  id: GameId;
+  name: string;
+  oneLiner: string;
+  glyph: React.ReactNode;
+  /* Color tiles flood the screen with their accent on select… */
+  accent?: string;
+  /* …Shapes tiles wipe it with their own B&W animated pattern instead */
+  pattern?: ShapeGameId;
+}
+
+const gamesList: Tile[] = [
   {
-    id: "swatch" as GameId,
+    id: "swatch",
     name: "Color Match",
     oneLiner: "Spot the exact color among near-identical impostors.",
     accent: "#ff4b3e",
     glyph: <SwatchGlyph />,
   },
   {
-    id: "mix" as GameId,
+    id: "mix",
     name: "Color Mixer",
     oneLiner: "Blend the dials until your mix melts into the target.",
     accent: "#2d6cf6",
     glyph: <MixGlyph />,
   },
   {
-    id: "echo" as GameId,
+    id: "echo",
     name: "Repeat the Pattern",
     oneLiner: "Watch the pads fire, then answer in exact order.",
     accent: "#ffc400",
     glyph: <EchoGlyph />,
   },
   {
-    id: "between" as GameId,
+    id: "between",
     name: "Find the Spot",
     oneLiner: "Pin the color to its exact home on the gradient.",
     accent: "#1fbf66",
     glyph: <BetweenGlyph />,
   },
   {
-    id: "shift" as GameId,
+    id: "shift",
     name: "Spot the Difference",
     oneLiner: "One block drifted off-color. Find it.",
     accent: "#2d6cf6",
     glyph: <ShiftGlyph />,
   },
   {
-    id: "tally" as GameId,
+    id: "tally",
     name: "Count it all",
     oneLiner: "Count the pieces before they vanish — dots first, then shapes.",
     accent: "#ff4b3e",
@@ -66,9 +92,59 @@ const gamesList = [
   },
 ];
 
+/* The Shapes set — six parallel instruments anchored on form, not color.
+   Everything inside them is purely greyscale. */
+const shapesList: Tile[] = [
+  {
+    id: "form",
+    name: "Shape Match",
+    oneLiner: "Spot the exact shape among near-identical impostors.",
+    pattern: "form",
+    glyph: <FormGlyph />,
+  },
+  {
+    id: "tilt",
+    name: "Match the Tilt",
+    oneLiner: "Memorize an angle, then set the line back to it.",
+    pattern: "tilt",
+    glyph: <TiltGlyph />,
+  },
+  {
+    id: "chain",
+    name: "Repeat the Chain",
+    oneLiner: "Watch shapes land in order, then rebuild the chain.",
+    pattern: "chain",
+    glyph: <ChainGlyph />,
+  },
+  {
+    id: "round",
+    name: "Round the Corner",
+    oneLiner: "Match the corner curve from memory.",
+    pattern: "round",
+    glyph: <SquircleGlyph />,
+  },
+  {
+    id: "shapeshift",
+    name: "Spot the Shift",
+    oneLiner: "One shape came back changed. Find it.",
+    pattern: "shapeshift",
+    glyph: <ShapeShiftGlyph />,
+  },
+  {
+    id: "shapetally",
+    name: "Count the Shapes",
+    oneLiner: "Count the pieces before they vanish — no color to help.",
+    pattern: "shapetally",
+    glyph: <ShapeTallyGlyph />,
+  },
+];
+
 interface Flood {
   rect: { left: number; top: number; width: number; height: number };
-  color: string;
+  /* Exactly one of these is set: color mode floods a hue, shapes mode
+     wipes a B&W pattern */
+  color?: string;
+  pattern?: ShapeGameId;
   id: GameId;
   phase: "expand" | "fade";
 }
@@ -97,11 +173,18 @@ const loadPlayed = (): Set<GameId> => {
 };
 
 export default function App() {
-  const [activeGame, setActiveGame] = useState<GameId | null>(null);
+  /* One screen variable: a game, the Spectrum self-check, or home (null) */
+  const [screen, setScreen] = useState<GameId | "spectrum" | null>(null);
+  /* Which tile set is showing. Deliberately not persisted — every fresh
+     load opens in Color mode. */
+  const [mode, setMode] = useState<PlayMode>("color");
   const [soundOn, setSoundOn] = useState(true);
   const [played, setPlayed] = useState<Set<GameId>>(loadPlayed);
   const [streaks, setStreaks] = useState<StreakMap>(loadStreaks);
   const [flood, setFlood] = useState<Flood | null>(null);
+
+  const currentList = mode === "color" ? gamesList : shapesList;
+  const doneCount = currentList.filter((g) => played.has(g.id)).length;
 
   const handleToggleSound = () => {
     const next = toggleSound();
@@ -114,29 +197,44 @@ export default function App() {
     }
   };
 
-  /* The Chroma transition: the tile's color floods outward into the game
-     screen — one continuous move, no cut. */
-  const handleSelectGame = (id: GameId, e: React.MouseEvent<HTMLButtonElement>) => {
+  const handleSetMode = (next: PlayMode) => {
+    if (next === mode || flood) return;
+    playTick();
+    triggerHaptic();
+    setMode(next);
+  };
+
+  /* The Chroma transition: a color tile's accent floods outward into the
+     game screen; a Shapes tile wipes it with that game's own B&W pattern —
+     same geometry, one continuous move, no cut. */
+  const handleSelectGame = (tile: Tile, e: React.MouseEvent<HTMLButtonElement>) => {
     if (flood) return;
     playTick();
     triggerHaptic();
     const r = e.currentTarget.getBoundingClientRect();
-    const accent = gamesList.find((g) => g.id === id)!.accent;
     setFlood({
       rect: { left: r.left, top: r.top, width: r.width, height: r.height },
-      color: accent,
-      id,
+      color: tile.accent,
+      pattern: tile.pattern,
+      id: tile.id,
       phase: "expand",
     });
   };
 
+  const handleOpenSpectrum = () => {
+    if (flood) return;
+    playTick();
+    triggerHaptic();
+    setScreen("spectrum");
+  };
+
   const handleBackToHome = () => {
-    setActiveGame(null);
+    setScreen(null);
   };
 
   /* Games report each round: correct answers grow that game's streak,
      a miss resets it, and either way the game is marked played. Both survive
-     reloads via localStorage. */
+     reloads via localStorage — Shapes instruments included. */
   const reportResult = (id: GameId, correct: boolean) => {
     setPlayed((prev) => {
       if (prev.has(id)) return prev;
@@ -161,7 +259,7 @@ export default function App() {
   };
 
   const gameProps = (id: GameId) => ({
-    accentColor: gamesList.find((g) => g.id === id)!.accent,
+    accentColor: [...gamesList, ...shapesList].find((g) => g.id === id)?.accent ?? "#111116",
     onBack: handleBackToHome,
     onResult: (correct: boolean) => reportResult(id, correct),
     streak: streaks[id] ?? 0,
@@ -177,7 +275,7 @@ export default function App() {
             <PoloMark />
             <span className="font-display font-extrabold text-[17px] tracking-[0.02em]">POLO</span>
             <div className="ml-auto flex items-center gap-5">
-              {!activeGame && <Streak total={gamesList.length} done={played.size} className="hidden sm:flex" />}
+              {!screen && <Streak total={currentList.length} done={doneCount} className="hidden sm:flex" />}
               <button
                 id="sound-toggle-btn"
                 onClick={handleToggleSound}
@@ -191,10 +289,10 @@ export default function App() {
           </header>
 
           <main className="flex-1 flex flex-col py-8">
-            {!activeGame ? (
+            {!screen ? (
               <div className="flex flex-col flex-1">
                 {/* Head with the quiet 3D moment behind it */}
-                <div className="relative mb-9 min-h-[128px] flex flex-col justify-center">
+                <div className="relative mb-8 min-h-[128px] flex flex-col justify-center">
                   <Suspense fallback={null}>
                     <AmbientBlocks />
                   </Suspense>
@@ -202,17 +300,38 @@ export default function App() {
                     Train your eye.
                   </h1>
                   <span className="relative font-mono font-medium text-[12px] tracking-[0.2em] uppercase text-mut tabular-nums">
-                    Daily drill · <b className="text-ink font-extrabold">{played.size} of {gamesList.length}</b> instruments done
+                    Daily drill · <b className="text-ink font-extrabold">{doneCount} of {currentList.length}</b> instruments done
                   </span>
                 </div>
 
-                {/* Game tiles — they land, they don't appear */}
-                <div id="games-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {gamesList.map((game, i) => (
+                {/* Mode toggle — Color and Shapes swap the six instruments */}
+                <div className="flex justify-center mb-7">
+                  <div id="mode-toggle" className="inline-flex border-2 border-ink rounded-full p-1 bg-paper" role="tablist" aria-label="Game mode">
+                    {(["color", "shapes"] as PlayMode[]).map((m) => (
+                      <button
+                        key={m}
+                        id={`mode-toggle-${m}`}
+                        role="tab"
+                        aria-selected={mode === m}
+                        onClick={() => handleSetMode(m)}
+                        className={`px-6 py-2 rounded-full font-mono font-extrabold text-[11px] tracking-[0.16em] uppercase cursor-pointer transition-colors ${
+                          mode === m ? "bg-ink text-paper" : "text-ink hover:bg-wash"
+                        }`}
+                      >
+                        {m === "color" ? "Color" : "Shapes"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Game tiles — they land, they don't appear. Keyed by mode so
+                    switching replays the landing. */}
+                <div id="games-grid" key={mode} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {currentList.map((game, i) => (
                     <motion.button
                       key={game.id}
                       id={`game-tile-${game.id}`}
-                      onClick={(e) => handleSelectGame(game.id, e)}
+                      onClick={(e) => handleSelectGame(game, e)}
                       initial={{ opacity: 0, y: 26, rotate: -1.5 }}
                       animate={{ opacity: 1, y: 0, rotate: 0 }}
                       transition={{ delay: 0.05 + i * 0.06, type: "spring", stiffness: 320, damping: 21 }}
@@ -241,15 +360,36 @@ export default function App() {
                     </motion.button>
                   ))}
                 </div>
+
+                {/* The Spectrum self-check — visible in both modes */}
+                <div className="flex justify-center mt-9">
+                  <button
+                    id="vision-check-link"
+                    onClick={handleOpenSpectrum}
+                    className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-ink inline-flex items-center gap-2 underline underline-offset-4 decoration-2 hover:decoration-play-blue cursor-pointer"
+                  >
+                    Check your color vision
+                    <svg width="13" height="12" viewBox="0 0 14 12" aria-hidden="true">
+                      <path d="M1.5 6h10.5M7.6 1.6 12 6l-4.4 4.4" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="flex-1 flex flex-col">
-                {activeGame === "swatch" && <SwatchGame {...gameProps("swatch")} />}
-                {activeGame === "mix" && <MixGame {...gameProps("mix")} />}
-                {activeGame === "echo" && <EchoGame {...gameProps("echo")} />}
-                {activeGame === "between" && <BetweenGame {...gameProps("between")} />}
-                {activeGame === "shift" && <ShiftGame {...gameProps("shift")} />}
-                {activeGame === "tally" && <TallyGame {...gameProps("tally")} />}
+                {screen === "swatch" && <SwatchGame {...gameProps("swatch")} />}
+                {screen === "mix" && <MixGame {...gameProps("mix")} />}
+                {screen === "echo" && <EchoGame {...gameProps("echo")} />}
+                {screen === "between" && <BetweenGame {...gameProps("between")} />}
+                {screen === "shift" && <ShiftGame {...gameProps("shift")} />}
+                {screen === "tally" && <TallyGame {...gameProps("tally")} />}
+                {screen === "form" && <FormGame {...gameProps("form")} />}
+                {screen === "tilt" && <TiltGame {...gameProps("tilt")} />}
+                {screen === "chain" && <ChainGame {...gameProps("chain")} />}
+                {screen === "round" && <SquircleGame {...gameProps("round")} />}
+                {screen === "shapeshift" && <ShapeShiftGame {...gameProps("shapeshift")} />}
+                {screen === "shapetally" && <ShapeTallyGame {...gameProps("shapetally")} />}
+                {screen === "spectrum" && <Spectrum onBack={handleBackToHome} />}
               </div>
             )}
           </main>
@@ -263,11 +403,12 @@ export default function App() {
           </footer>
         </div>
 
-        {/* Color-flood transition overlay */}
+        {/* Tile→game transition overlay: accent flood (Color) or B&W pattern
+            wipe (Shapes) — same expand-then-fade, one continuous move */}
         {flood && (
           <motion.div
-            className="fixed z-50 pointer-events-none"
-            style={{ background: flood.color }}
+            className="fixed z-50 pointer-events-none overflow-hidden"
+            style={{ background: flood.color ?? "var(--color-paper)" }}
             initial={{
               left: flood.rect.left,
               top: flood.rect.top,
@@ -288,13 +429,19 @@ export default function App() {
             }
             onAnimationComplete={() => {
               if (flood.phase === "expand") {
-                setActiveGame(flood.id);
+                setScreen(flood.id);
                 setFlood({ ...flood, phase: "fade" });
               } else {
                 setFlood(null);
               }
             }}
-          />
+          >
+            {flood.pattern && (
+              <span className={`polo-wipe polo-wipe-${flood.pattern}`} aria-hidden="true">
+                <i />
+              </span>
+            )}
+          </motion.div>
         )}
       </div>
       <Analytics />
