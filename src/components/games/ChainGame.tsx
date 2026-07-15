@@ -40,11 +40,11 @@ export const ChainGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
     timers.current = [];
   };
 
-  /* Fixed schedule: every round climbs one rung, capped at L6, and a wrong
-     answer never rolls it back. Next run goes straight to the countdown. */
+  /* Pass-gated: only a perfect chain climbs a rung (capped at L6) — a miss
+     replays the same rung. Next run goes straight to the countdown. */
   const handleNextRound = () => {
     clearTimers();
-    const nextLevel = Math.min(6, level + 1);
+    const nextLevel = roundData.isCorrect ? Math.min(6, level + 1) : level;
     setLevel(nextLevel);
     setRoundData(setupChainRound(nextLevel));
     setRound((r) => r + 1);
@@ -169,7 +169,7 @@ export const ChainGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
             steps={[
               `Watch ${params.len} shapes land along the row, one per position${params.allowRepeat ? " — shapes can repeat" : ""}.`,
               "Tap the shapes from the palette in that exact order, left to right.",
-              "Every round the chain grows longer and the shapes grow more alike.",
+              "Get it right and the chain grows longer and trickier; a slip replays the same length.",
             ]}
             glyph={<span className="scale-150 inline-block"><ChainGlyph /></span>}
             onComplete={() => setStage("stimulus")}

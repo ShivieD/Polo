@@ -27,36 +27,50 @@ export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }
   const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundData, setRoundData] = useState<ShapeTallyRoundData>(() => setupShapeTallyRound(1));
   const [round, setRound] = useState(1);
+  const [visibleCount, setVisibleCount] = useState<number>(0);
   const [countdown, setCountdown] = useState<number>(5);
   const autoAdvanceTimer = useRef<number | null>(null);
 
   const params = getShapeTallyParams(level);
   const isUserCorrect = roundData.userSelection === roundData.trueCount;
 
-  /* Fixed schedule: every round climbs one rung, capped at L6, and a wrong
-     answer never rolls it back. Next run goes straight to the countdown. */
+  /* Pass-gated: an exact count climbs one rung (capped at L6); a miss
+     replays the same rung. Next run goes straight to the countdown. */
   const handleNextRound = () => {
     if (autoAdvanceTimer.current) {
       clearTimeout(autoAdvanceTimer.current);
       autoAdvanceTimer.current = null;
     }
-    const nextLevel = Math.min(6, level + 1);
+    const nextLevel = isUserCorrect ? Math.min(6, level + 1) : level;
     setLevel(nextLevel);
     setRoundData(setupShapeTallyRound(nextLevel));
     setRound((r) => r + 1);
+    setVisibleCount(0);
     setStage("countdown");
     setCountdown(5);
   };
 
-  /* The whole board lands at once, holds for the level's exposure, then
-     vanishes — the shrinking window IS the difficulty */
+  /* Pieces drop one at a time, a tick per landing — the same cadence as
+     Count it All. Passing tightens the drop tempo. */
   useEffect(() => {
     if (stage === "stimulus") {
-      playTick();
-      const timer = setTimeout(() => setStage("answer"), params.exposure + 400);
-      return () => clearTimeout(timer);
+      setVisibleCount(0);
+      let popped = 0;
+      const total = roundData.points.length;
+      const interval = setInterval(() => {
+        if (popped < total) {
+          popped++;
+          setVisibleCount(popped);
+          playTick();
+        } else {
+          clearInterval(interval);
+          setTimeout(() => setStage("answer"), 850);
+        }
+      }, params.popSpeed);
+
+      return () => clearInterval(interval);
     }
-  }, [stage]);
+  }, [stage, roundData.points.length, params.popSpeed]);
 
   useEffect(() => {
     if (stage === "reveal") {
@@ -95,6 +109,7 @@ export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }
     >
       {roundData.points.map((pt, idx) => {
         const px = pt.r * dotScale;
+        const visible = !animated || idx < visibleCount;
         const piece = (
           <i
             className={`block w-full h-full bg-ink ${roundData.piece === "circle" ? "rounded-full" : "rounded-[22%]"}`}
@@ -104,9 +119,9 @@ export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }
           <motion.div
             key={idx}
             id={`shapetally-piece-${idx}`}
-            initial={{ y: -34, scale: 0.4, opacity: 0 }}
-            animate={{ y: 0, scale: 1, opacity: 1 }}
-            transition={{ delay: idx * 0.012, type: "spring", stiffness: 640, damping: 17 }}
+            initial={false}
+            animate={visible ? { y: 0, scale: 1, opacity: 1 } : { y: -34, scale: 0.4, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 640, damping: 17 }}
             className="absolute"
             style={{
               left: `${pt.x}%`,
@@ -148,9 +163,9 @@ export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }
           <Ready
             name="Count the Shapes"
             steps={[
-              "A scatter of identical pieces lands all at once.",
-              "Count them before they vanish — the window shrinks every round.",
-              "Pick how many there were. The wrong options creep closer too.",
+              "Identical pieces drop onto the board one by one.",
+              "Count them as they land — passing quickens the drops.",
+              "Pick how many landed. The wrong options creep closer too.",
             ]}
             glyph={<span className="scale-150 inline-block"><ShapeTallyGlyph /></span>}
             onComplete={() => setStage("stimulus")}
@@ -210,8 +225,8 @@ export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }
             <VerdictBody
               detail={
                 isUserCorrect
-                  ? `${roundData.trueCount} pieces with no color to chunk by — sharp counting. The window shrinks next round.`
-                  : `There were ${roundData.trueCount}. Group them into clusters of three or four as they land.`
+                  ? `${roundData.trueCount} pieces with no color to chunk by — sharp counting. The drops come faster next round.`
+                  : `There were ${roundData.trueCount}. The tempo stays put until you nail it — group the pieces in threes as they land.`
               }
             />
 

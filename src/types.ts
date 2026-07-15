@@ -15,9 +15,10 @@ export type GameId = ColorGameId | ShapeGameId;
 /* Which tile set the home screen shows. Resets to color on every load. */
 export type PlayMode = "color" | "shapes";
 
-/* In-session difficulty for shape games: fixed schedule, one rung per round,
-   capped at 6, never rolled back by a wrong answer. Resets on re-entry. */
-export type ShapeLevel = 1 | 2 | 3 | 4 | 5 | 6;
+/* In-session difficulty for shape games. Pass-gated: a passed round climbs
+   one rung, a miss replays the same rung. Most games cap at L6; Shape Match
+   spreads its ramp across L8. Resets on re-entry. */
+export type ShapeLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 export type GameStage = "getReady" | "stimulus" | "answer" | "reveal";
 
@@ -138,13 +139,16 @@ export interface ChainParams {
   sameFamily: boolean; // L6: pool drawn from one visual family
 }
 
+/* Corner order: top-left, top-right, bottom-right, bottom-left —
+   matching the CSS border-radius shorthand */
 export interface SquircleRoundData {
-  trueRadius: number; // corner radius, % of side, 4-40
-  guessRadius: number;
+  trueRadii: [number, number, number, number]; // % of side, 0-40 each
+  guessRadii: [number, number, number, number];
+  phase: number; // 0 = uniform corners; k = k corners differ from the base
   score: number | null;
 }
 
-export type ShapeChangeKind = "rotation" | "size" | "radius";
+export type ShapeChangeKind = "rotation" | "size" | "radius" | "swap";
 
 export interface ShapeShiftRoundData {
   baseSpec: ShapeSpec; // all four start as this

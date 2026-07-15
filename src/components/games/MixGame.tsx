@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { MixRoundData } from "../../types";
 import { setupMixRound } from "../../utils/gameLogic";
 import { hslToCss, getScoreForColors } from "../../utils/color";
-import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, PassNote } from "../ui/Kit";
 import { MixGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -63,7 +63,7 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const handleDone = () => {
     if (stage !== "answer") return;
     const finalScore = getScoreForColors(roundData.targetColor, roundData.userColor);
-    onResult?.(finalScore >= 75); // record the result once, at answer time
+    onResult?.(finalScore >= 80); // 80 is the pass mark; passes feed the streak
     setRoundData((prev) => ({ ...prev, score: finalScore }));
     setStage("reveal");
   };
@@ -82,13 +82,13 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
 
   const score = roundData.score ?? 0;
   /* Bands calibrated to the CIEDE2000 score: 90+ means the difference is
-     barely visible; 75+ means close but clearly distinguishable. */
+     barely visible; 80 is the app-wide pass mark. */
   const verdictHead =
-    score >= 90 ? "Resonance." : score >= 75 ? "Nearly there." : "Different animal.";
+    score >= 90 ? "Resonance." : score >= 80 ? "Nearly there." : "Different animal.";
   const verdictDetail =
     score >= 90
       ? "Your mix melts into the target."
-      : score >= 75
+      : score >= 80
         ? "Squint and they merge. Fine-tune the lightness next time."
         : "Compare the pair above — usually it's saturation that drifts first.";
 
@@ -141,6 +141,7 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
             ]}
             glyph={<span className="scale-150 inline-block"><MixGlyph /></span>}
             onComplete={() => setStage("stimulus")}
+            note={<PassNote tone="color" />}
           />
         )}
 
@@ -192,7 +193,7 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
           <div className="flex flex-col items-center gap-7">
             <VerdictHead
               id="mix-reveal-verdict"
-              ok={score >= 75}
+              ok={score >= 80}
               headline={verdictHead}
               score={String(score)}
               scoreCaption="Match / 100"

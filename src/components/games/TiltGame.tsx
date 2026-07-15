@@ -7,7 +7,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { TiltRoundData } from "../../types";
 import { setupTiltRound, getTiltParams, scoreTilt, tiltDiff } from "../../utils/shapeLogic";
-import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, PassNote } from "../ui/Kit";
 import { TiltGlyph } from "../ui/ShapeGlyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -36,18 +36,19 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const [round, setRound] = useState(1);
   const [countdown, setCountdown] = useState<number>(5);
   const autoAdvanceTimer = useRef<number | null>(null);
-  const isDragging = useRef(false);
+  /* Angle of the pointer at the last move event — null when not dragging */
+  const lastPointerAngle = useRef<number | null>(null);
 
   const params = getTiltParams(level);
 
-  /* Fixed schedule: every round climbs one rung, capped at L6, and a wrong
-     answer never rolls it back. Next run goes straight to the countdown. */
+  /* Pass-gated: 80+ climbs one rung (capped at L6); anything less replays
+     the same rung. Next run goes straight to the countdown. */
   const handleNextRound = () => {
     if (autoAdvanceTimer.current) {
       clearTimeout(autoAdvanceTimer.current);
       autoAdvanceTimer.current = null;
     }
-    setLevel((l) => Math.min(6, l + 1));
+    if ((roundData.score ?? 0) >= 80) setLevel((l) => Math.min(6, l + 1));
     setRoundData(setupTiltRound());
     setRound((r) => r + 1);
     setStage("countdown");
@@ -76,31 +77,35 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
     }
   }, [stage]);
 
-  /* Drag anywhere on the dial: the line follows the pointer's angle from
-     the center. Same pointer-capture pattern as the Between marker drag. */
-  const updateAngle = (clientX: number, clientY: number) => {
+  /* RELATIVE drag: the line follows how far the pointer has swept around the
+     center since the last move — never where it merely sits. A bare click
+     applies no delta, so click-to-set (and click-to-cheat) is impossible. */
+  const pointerAngle = (clientX: number, clientY: number): number | null => {
     const dial = document.getElementById("tilt-dial");
-    if (!dial) return;
+    if (!dial) return null;
     const rect = dial.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
-    const angle = (Math.atan2(-(clientY - cy), clientX - cx) * 180) / Math.PI;
-    setRoundData((prev) => ({ ...prev, guessAngle: ((angle % 180) + 180) % 180 }));
+    return (Math.atan2(-(clientY - cy), clientX - cx) * 180) / Math.PI;
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (stage !== "answer") return;
-    isDragging.current = true;
-    updateAngle(e.clientX, e.clientY);
+    lastPointerAngle.current = pointerAngle(e.clientX, e.clientY);
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDragging.current || stage !== "answer") return;
-    updateAngle(e.clientX, e.clientY);
+    if (lastPointerAngle.current === null || stage !== "answer") return;
+    const pa = pointerAngle(e.clientX, e.clientY);
+    if (pa === null) return;
+    /* Shortest signed sweep between the two pointer bearings */
+    const delta = ((pa - lastPointerAngle.current + 540) % 360) - 180;
+    lastPointerAngle.current = pa;
+    setRoundData((prev) => ({ ...prev, guessAngle: (((prev.guessAngle + delta) % 180) + 180) % 180 }));
   };
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDragging.current) return;
-    isDragging.current = false;
+    if (lastPointerAngle.current === null) return;
+    lastPointerAngle.current = null;
     e.currentTarget.releasePointerCapture(e.pointerId);
     playTick();
     triggerHaptic();
@@ -109,7 +114,7 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const handleDone = () => {
     if (stage !== "answer") return;
     const score = scoreTilt(roundData.guessAngle, roundData.trueAngle, level);
-    onResult?.(score >= 85); // record the result once, at answer time
+    onResult?.(score >= 80); // 80 is the pass mark; passes feed the streak
     setRoundData((prev) => ({ ...prev, score }));
     setStage("reveal");
   };
@@ -117,13 +122,13 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const score = roundData.score ?? 0;
   const diff = tiltDiff(roundData.guessAngle, roundData.trueAngle);
   const verdictHead =
-    score >= 95 ? "Dead level." : score >= 85 ? "Sharp eye." : score >= 65 ? "Close." : "Off the mark.";
+    score >= 95 ? "Dead level." : score >= 80 ? "Sharp eye." : score >= 60 ? "Close." : "Off the mark.";
   const verdictDetail =
     score >= 95
       ? "That is elite angle memory."
-      : score >= 85
-        ? `Within ${Math.max(1, Math.round(diff))}° of true.`
-        : score >= 65
+      : score >= 80
+        ? `Within ${Math.max(1, Math.round(diff))}° of true — that's a pass.`
+        : score >= 60
           ? "Anchor the line against an imaginary clock face next time."
           : "Angles drift fast in memory. Again.";
 
@@ -145,13 +150,14 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
           <Ready
             name="Match the Tilt"
             steps={[
-              "Study and memorize the line's exact tilt — the glimpse gets shorter each round.",
-              "We take it away. Drag on the dial to set your line back to that angle.",
+              "Study and memorize the line's exact tilt — passing shortens the next glimpse.",
+              "We take it away. Grab the handle and drag the line back to that angle.",
               "Lock it in to see how many degrees you drifted.",
             ]}
             glyph={<span className="scale-150 inline-block"><TiltGlyph /></span>}
             onComplete={() => setStage("stimulus")}
             mono
+            note={<PassNote />}
           />
         )}
 
@@ -179,10 +185,12 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
           <div className="flex flex-col items-center w-full gap-7">
             <p className="text-[15px] text-mut max-w-[30ch] leading-relaxed text-center">
               <b className="text-ink font-semibold">Set the line back.</b><br />
-              Drag anywhere on the dial to rotate it.
+              Grab the handle and sweep it around — clicking alone won't move it.
             </p>
 
-            {/* The dial — outlined because it's touchable */}
+            {/* The dial — outlined because it's touchable. The knob on the
+                line's end is the drag affordance; the first-entry wiggle
+                makes it unmissable. */}
             <div
               id="tilt-dial"
               onPointerDown={handlePointerDown}
@@ -190,9 +198,18 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
               onPointerUp={handlePointerUp}
               className="w-64 h-64 sm:w-72 sm:h-72 rounded-full border-2 border-ink bg-wash cursor-grab active:cursor-grabbing select-none touch-none"
             >
-              <svg viewBox="0 0 100 100" className="w-full h-full block pointer-events-none" aria-hidden="true">
+              <svg viewBox="0 0 100 100" className="polo-wiggle w-full h-full block pointer-events-none" aria-hidden="true">
                 <line {...guessEnds} stroke="var(--color-ink)" strokeWidth="6" strokeLinecap="round" />
                 <circle cx="50" cy="50" r="3.2" fill="var(--color-paper)" stroke="var(--color-ink)" strokeWidth="2" />
+                <circle
+                  id="tilt-drag-knob"
+                  cx={guessEnds.x2}
+                  cy={guessEnds.y2}
+                  r="5.5"
+                  fill="var(--color-paper)"
+                  stroke="var(--color-ink)"
+                  strokeWidth="2.5"
+                />
               </svg>
             </div>
 
@@ -204,7 +221,7 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
           <div className="flex flex-col items-center w-full gap-6">
             <VerdictHead
               id="tilt-reveal-verdict"
-              ok={score >= 85}
+              ok={score >= 80}
               headline={verdictHead}
               score={String(score)}
               scoreCaption="Accuracy / 100"

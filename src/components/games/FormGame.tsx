@@ -6,7 +6,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { FormRoundData } from "../../types";
-import { setupFormRound, FORM_EXPOSURE_MS } from "../../utils/shapeLogic";
+import { setupFormRound, explainFormMiss, FORM_EXPOSURE_MS, FORM_MAX_LEVEL } from "../../utils/shapeLogic";
 import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, Wobble } from "../ui/Kit";
 import { FormGlyph, ShapeSvg } from "../ui/ShapeGlyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
@@ -30,14 +30,14 @@ export const FormGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const [countdown, setCountdown] = useState<number>(4);
   const autoAdvanceTimer = useRef<number | null>(null);
 
-  /* Fixed schedule: every round climbs one rung, capped at L6, and a wrong
-     answer never rolls it back. Next run goes straight to the countdown. */
+  /* Pass-gated: a correct answer climbs one rung (capped at L8); a miss
+     replays the same rung. Next run goes straight to the countdown. */
   const handleNextRound = () => {
     if (autoAdvanceTimer.current) {
       clearTimeout(autoAdvanceTimer.current);
       autoAdvanceTimer.current = null;
     }
-    const nextLevel = Math.min(6, level + 1);
+    const nextLevel = isUserCorrect ? Math.min(FORM_MAX_LEVEL, level + 1) : level;
     setLevel(nextLevel);
     setRoundData(setupFormRound(nextLevel));
     setRound((r) => r + 1);
@@ -96,7 +96,7 @@ export const FormGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
             steps={[
               "Memorize one shape — you get two seconds.",
               "It hides among five near-identical impostors.",
-              "Tap the exact shape you saw. Every round the impostors get closer.",
+              "Tap the exact shape you saw. Every correct answer pulls the impostors a little closer.",
             ]}
             glyph={<span className="scale-150 inline-block"><FormGlyph /></span>}
             onComplete={() => setStage("stimulus")}
@@ -200,7 +200,9 @@ export const FormGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
               detail={
                 isUserCorrect
                   ? "You picked the exact specimen from the lineup."
-                  : "The correct shape wears the solid ink outline — compare it against your pick."
+                  : roundData.userSelection !== null
+                    ? explainFormMiss(roundData.target, roundData.options[roundData.userSelection].spec)
+                    : "The correct shape wears the solid ink outline."
               }
             />
 

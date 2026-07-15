@@ -25,13 +25,14 @@ import {
 
 const ALL_KINDS: ShapeKind[] = ["square", "circle", "triangle", "plus", "hexagon", "halfCircle", "cross", "arrow"];
 
-const shuffle = <T,>(arr: T[]): T[] => [...arr].sort(() => Math.random() - 0.5);
+import { shuffleArray as shuffle } from "./shuffle";
 
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
 const randInt = (min: number, max: number) => Math.floor(rand(min, max + 1));
 const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
-const clampLevel = (level: number): ShapeLevel => Math.max(1, Math.min(6, Math.round(level))) as ShapeLevel;
+const clampLevel = (level: number, max = 6): ShapeLevel =>
+  Math.max(1, Math.min(max, Math.round(level))) as ShapeLevel;
 
 /* ------------------------------------------------------------------ */
 /* Shape Match (Form) — distractor similarity tightens per level        */
@@ -51,9 +52,13 @@ const SIMILAR: Record<ShapeKind, ShapeKind[]> = {
 };
 
 export const FORM_EXPOSURE_MS = 2000;
+export const FORM_MAX_LEVEL = 8;
 
+/* The L1→L8 ramp trades one knob at a time, in smaller steps than v1 so the
+   difficulty doesn't cliff: families → neighbors → mixed → coarse aspect →
+   fine aspect → paint → ±12% size → ±7% size. */
 export function setupFormRound(levelIn: number): FormRoundData {
-  const level = clampLevel(levelIn);
+  const level = clampLevel(levelIn, FORM_MAX_LEVEL);
   const kind = pick(ALL_KINDS);
   let specs: ShapeSpec[];
   let targetIdx: number;
@@ -68,11 +73,25 @@ export function setupFormRound(levelIn: number): FormRoundData {
     specs = [{ kind }, ...SIMILAR[kind].slice(0, 5).map((k) => ({ kind: k }))];
     targetIdx = 0;
   } else if (level === 3) {
-    /* Same shape, different aspect ratios */
-    const aspects = shuffle([1, 0.62, 0.78, 0.9, 1.16, 1.38]);
-    specs = aspects.map((aspect) => ({ kind, aspect }));
-    targetIdx = randInt(0, 5);
+    /* Half-step: three near-neighbors plus two stretched twins of the target */
+    specs = [
+      { kind },
+      ...SIMILAR[kind].slice(0, 3).map((k) => ({ kind: k })),
+      { kind, aspect: 0.6 },
+      { kind, aspect: 1.55 },
+    ];
+    targetIdx = 0;
   } else if (level === 4) {
+    /* Same shape, clearly different aspect ratios */
+    const aspects = shuffle([1, 0.5, 0.7, 1.4, 1.9, 0.33]);
+    specs = aspects.map((aspect) => ({ kind, aspect }));
+    targetIdx = aspects.indexOf(1);
+  } else if (level === 5) {
+    /* Same shape, subtler aspect ratios */
+    const aspects = shuffle([1, 0.72, 0.85, 1.18, 1.4, 0.6]);
+    specs = aspects.map((aspect) => ({ kind, aspect }));
+    targetIdx = aspects.indexOf(1);
+  } else if (level === 6) {
     /* Same shape, varying line weight or fill */
     const paints: Partial<ShapeSpec>[] = shuffle([
       { filled: true },
@@ -85,9 +104,9 @@ export function setupFormRound(levelIn: number): FormRoundData {
     specs = paints.map((p) => ({ kind, ...p }));
     targetIdx = randInt(0, 5);
   } else {
-    /* L5 ~10% / L6 ~5% proportional variations of the same shape */
-    const step = level === 5 ? 0.1 : 0.05;
-    const base = 0.74;
+    /* L7 ~12% / L8 ~7% proportional size variations of the same shape */
+    const step = level === 7 ? 0.12 : 0.07;
+    const base = 0.72;
     const factors = shuffle([0, 1, 2, -1, -2, 3].map((k) => Math.pow(1 + step, k)));
     specs = factors.map((f) => ({ kind, scale: Math.min(1, base * f) }));
     targetIdx = randInt(0, 5);
@@ -96,6 +115,53 @@ export function setupFormRound(levelIn: number): FormRoundData {
   const order = shuffle(specs.map((_, i) => i));
   const options = order.map((i) => ({ spec: specs[i], isCorrect: i === targetIdx }));
   return { target: specs[targetIdx], options, userSelection: null };
+}
+
+const KIND_LABEL: Record<ShapeKind, string> = {
+  square: "square",
+  circle: "circle",
+  triangle: "triangle",
+  plus: "plus",
+  hexagon: "hexagon",
+  halfCircle: "half-circle",
+  cross: "cross",
+  arrow: "arrow",
+};
+
+/* Explain a Shape Match miss in terms of the ACTUAL difference between the
+   picked shape and the target, so the feedback always fits the mistake. */
+export function explainFormMiss(target: ShapeSpec, picked: ShapeSpec): string {
+  if (picked.kind !== target.kind) {
+    return `You picked the ${KIND_LABEL[picked.kind]} — the target was the ${KIND_LABEL[target.kind]}.`;
+  }
+  const tFilled = target.filled ?? true;
+  const pFilled = picked.filled ?? true;
+  if (tFilled !== pFilled) {
+    return pFilled
+      ? "Yours was the filled one — the target was outlined."
+      : "Yours was outlined — the target was the filled one.";
+  }
+  if (!tFilled && (picked.strokeW ?? 7) !== (target.strokeW ?? 7)) {
+    return (picked.strokeW ?? 7) > (target.strokeW ?? 7)
+      ? "Same shape, but your outline was heavier than the target's."
+      : "Same shape, but your outline was lighter than the target's.";
+  }
+  const tAspect = target.aspect ?? 1;
+  const pAspect = picked.aspect ?? 1;
+  if (Math.abs(tAspect - pAspect) > 0.01) {
+    return pAspect > tAspect
+      ? "Same shape, but yours was stretched wider than the target."
+      : "Same shape, but yours was squeezed taller than the target.";
+  }
+  const tScale = target.scale ?? 1;
+  const pScale = picked.scale ?? 1;
+  if (Math.abs(tScale - pScale) > 0.001) {
+    const pct = Math.max(1, Math.round((Math.abs(pScale - tScale) / tScale) * 100));
+    return pScale > tScale
+      ? `Same shape, but yours was about ${pct}% larger than the target.`
+      : `Same shape, but yours was about ${pct}% smaller than the target.`;
+  }
+  return "A twin got you — at this level the differences are razor thin.";
 }
 
 /* ------------------------------------------------------------------ */
@@ -192,32 +258,82 @@ const SQUIRCLE_TABLE = [
 
 export const getSquircleParams = (level: number) => SQUIRCLE_TABLE[clampLevel(level) - 1];
 
-export function setupSquircleRound(): SquircleRoundData {
-  return { trueRadius: rand(4, MAX_RADIUS), guessRadius: 0, score: null };
+/* Every 20 passed rounds one more corner breaks away from the rest —
+   and the exposure timer resets to the full two seconds. */
+export const SQUIRCLE_PASSES_PER_PHASE = 20;
+export const getSquirclePhase = (passes: number) => Math.min(3, Math.floor(passes / SQUIRCLE_PASSES_PER_PHASE));
+
+/* Stratified base radius: pick a band first so targets stop clumping in the
+   comfortable middle of the range. */
+const radiusInBand = () => {
+  const bands: [number, number][] = [
+    [2, 11],
+    [11, 21],
+    [21, 31],
+    [31, MAX_RADIUS],
+  ];
+  const [lo, hi] = pick(bands);
+  return rand(lo, hi);
+};
+
+export function setupSquircleRound(passes: number): SquircleRoundData {
+  const phase = getSquirclePhase(passes);
+  const base = radiusInBand();
+  const trueRadii: [number, number, number, number] = [base, base, base, base];
+
+  /* In phase k, k distinct corners drift from the base by a visible margin */
+  const corners = shuffle([0, 1, 2, 3]).slice(0, phase);
+  for (const c of corners) {
+    const delta = rand(10, 18);
+    const up = base + delta <= MAX_RADIUS ? Math.random() > 0.5 : false;
+    const down = base - delta >= 0;
+    trueRadii[c] = up || !down ? Math.min(MAX_RADIUS, base + delta) : Math.max(0, base - delta);
+  }
+
+  return { trueRadii, guessRadii: [0, 0, 0, 0], phase, score: null };
 }
 
-export function scoreSquircle(guess: number, truth: number, level: number): number {
+export function scoreSquircle(
+  guess: [number, number, number, number],
+  truth: [number, number, number, number],
+  level: number
+): number {
   const { tolerance } = getSquircleParams(level);
-  const diff = Math.abs(guess - truth);
-  if (diff <= tolerance * MAX_RADIUS) return 100;
-  return Math.round(Math.max(0, 100 * (1 - diff / MAX_RADIUS)));
+  const err = guess.reduce((sum, g, i) => sum + Math.abs(g - truth[i]), 0) / 4;
+  if (err <= tolerance * MAX_RADIUS) return 100;
+  return Math.round(Math.max(0, 100 * (1 - err / MAX_RADIUS)));
 }
 
 /* ------------------------------------------------------------------ */
 /* Spot the Shift — magnitude of the change shrinks per level           */
 /* ------------------------------------------------------------------ */
 
-/* One number per level: degrees for rotation, % for size and radius */
-const SHIFT_MAGNITUDE = [30, 20, 15, 10, 7, 4];
-
-export const getShiftMagnitude = (level: number) => SHIFT_MAGNITUDE[clampLevel(level) - 1];
+/* Instead of a monotonic magnitude ladder (which walls players around round
+   six), every round draws a difficulty TIER from a level-weighted mix:
+   - swap:   the changed shape comes back as a different shape entirely (easy)
+   - coarse: a big attribute change, 25-35 (medium)
+   - fine:   a subtle change from the per-level table (hard)
+   Higher levels skew harder but easy rounds never fully disappear. */
+const SHIFT_FINE_MAGNITUDE = [18, 14, 11, 8, 6, 4];
+const SHIFT_TIER_WEIGHTS: [number, number, number][] = [
+  [0.5, 0.5, 0.0],
+  [0.35, 0.45, 0.2],
+  [0.25, 0.4, 0.35],
+  [0.2, 0.35, 0.45],
+  [0.15, 0.3, 0.55],
+  [0.1, 0.25, 0.65],
+];
 
 /* Kinds where every change type stays visible (no circles — rotation
    would be a no-op) */
 const SHIFT_KINDS: ShapeKind[] = ["square", "triangle", "arrow", "hexagon", "plus"];
 
 export function setupShapeShiftRound(levelIn: number): ShapeShiftRoundData {
-  const mag = getShiftMagnitude(levelIn);
+  const level = clampLevel(levelIn);
+  const [wSwap, wCoarse] = SHIFT_TIER_WEIGHTS[level - 1];
+  const roll = Math.random();
+  const tier = roll < wSwap ? "swap" : roll < wSwap + wCoarse ? "coarse" : "fine";
+
   const kind = pick(SHIFT_KINDS);
   const baseSpec: ShapeSpec = {
     kind,
@@ -226,22 +342,31 @@ export function setupShapeShiftRound(levelIn: number): ShapeShiftRoundData {
     radius: kind === "square" ? randInt(8, 16) : undefined,
   };
 
-  const changeKinds: ShapeChangeKind[] = kind === "square" ? ["rotation", "size", "radius"] : ["rotation", "size"];
-  const changeKind = pick(changeKinds);
-  const dir = Math.random() > 0.5 ? 1 : -1;
-
+  let changeKind: ShapeChangeKind;
   const changedSpec: ShapeSpec = { ...baseSpec };
-  if (changeKind === "rotation") {
-    changedSpec.rotation = (baseSpec.rotation ?? 0) + dir * mag;
-  } else if (changeKind === "size") {
-    const factor = 1 + (dir * mag) / 100;
-    changedSpec.scale = Math.max(0.35, Math.min(1, (baseSpec.scale ?? 1) * factor));
+
+  if (tier === "swap") {
+    changeKind = "swap";
+    changedSpec.kind = pick(ALL_KINDS.filter((k) => k !== kind));
+    if (changedSpec.kind !== "square") changedSpec.radius = undefined;
   } else {
-    const delta = (mag / 100) * MAX_RADIUS;
-    const base = baseSpec.radius ?? 12;
-    /* Push away from the clamp edge so the delta always survives */
-    const d = base + delta > MAX_RADIUS ? -delta : base - delta < 2 ? delta : dir * delta;
-    changedSpec.radius = Math.max(2, Math.min(MAX_RADIUS, base + d));
+    const mag = tier === "coarse" ? rand(25, 35) : SHIFT_FINE_MAGNITUDE[level - 1];
+    const kinds: ShapeChangeKind[] = kind === "square" ? ["rotation", "size", "radius"] : ["rotation", "size"];
+    changeKind = pick(kinds);
+    const dir = Math.random() > 0.5 ? 1 : -1;
+
+    if (changeKind === "rotation") {
+      changedSpec.rotation = (baseSpec.rotation ?? 0) + dir * mag;
+    } else if (changeKind === "size") {
+      const factor = 1 + (dir * mag) / 100;
+      changedSpec.scale = Math.max(0.35, Math.min(1, (baseSpec.scale ?? 1) * factor));
+    } else {
+      const delta = (mag / 100) * MAX_RADIUS;
+      const base = baseSpec.radius ?? 12;
+      /* Push away from the clamp edge so the delta always survives */
+      const d = base + delta > MAX_RADIUS ? -delta : base - delta < 2 ? delta : dir * delta;
+      changedSpec.radius = Math.max(2, Math.min(MAX_RADIUS, base + d));
+    }
   }
 
   return { baseSpec, changedIndex: randInt(0, 3), changedSpec, changeKind, userSelection: null };
@@ -251,13 +376,15 @@ export function setupShapeShiftRound(levelIn: number): ShapeShiftRoundData {
 /* Count the Shapes — exposure and distractor closeness per level       */
 /* ------------------------------------------------------------------ */
 
+/* Pieces drop one at a time (with a tick each, like Count it All); the
+   per-level squeeze is the drop tempo plus how close the wrong options sit */
 const SHAPE_TALLY_TABLE = [
-  { exposure: 1500, offsets: [2, 3] },
-  { exposure: 1300, offsets: [2] },
-  { exposure: 1100, offsets: [1, 2] },
-  { exposure: 900, offsets: [1] },
-  { exposure: 700, offsets: [1] },
-  { exposure: 500, offsets: [1] },
+  { popSpeed: 260, offsets: [2, 3] },
+  { popSpeed: 225, offsets: [2] },
+  { popSpeed: 190, offsets: [1, 2] },
+  { popSpeed: 155, offsets: [1] },
+  { popSpeed: 120, offsets: [1] },
+  { popSpeed: 90, offsets: [1] },
 ];
 
 export const getShapeTallyParams = (level: number) => SHAPE_TALLY_TABLE[clampLevel(level) - 1];

@@ -130,6 +130,14 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
     }
   };
 
+  /* Beta ask: a wrong press shouldn't be final — undo removes the last tap */
+  const handleUndo = () => {
+    if (stage !== "answer" || roundData.userTaps.length === 0) return;
+    playTick();
+    triggerHaptic();
+    setRoundData((prev) => ({ ...prev, userTaps: prev.userTaps.slice(0, -1) }));
+  };
+
   const isTapped = (id: number) => roundData.userTaps.includes(id);
   const tapOrder = (id: number) => roundData.userTaps.indexOf(id) + 1;
 
@@ -247,6 +255,14 @@ export const EchoGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
             </div>
             {/* Live strip of your taps so far — essential once pads repeat */}
             {params.allowRepeat && roundData.userTaps.length > 0 && seqStrip("Your taps", roundData.userTaps)}
+            <button
+              id="echo-undo-btn"
+              onClick={handleUndo}
+              disabled={roundData.userTaps.length === 0}
+              className="font-mono font-extrabold text-[11px] tracking-[0.14em] uppercase text-mut underline underline-offset-4 decoration-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Undo last
+            </button>
           </div>
         )}
 

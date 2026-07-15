@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { Suspense, lazy, useState } from "react";
+import React, { Suspense, lazy, useEffect, useState } from "react";
 import { motion, MotionConfig } from "motion/react";
 import { Analytics } from "@vercel/analytics/react";
 import { GameId, PlayMode, ShapeGameId } from "./types";
@@ -17,7 +17,6 @@ import {
   ShapeShiftGlyph,
   ShapeTallyGlyph,
 } from "./components/ui/ShapeGlyphs";
-import { Streak } from "./components/ui/Kit";
 
 import { SwatchGame } from "./components/games/SwatchGame";
 import { MixGame } from "./components/games/MixGame";
@@ -85,7 +84,7 @@ const gamesList: Tile[] = [
   },
   {
     id: "tally",
-    name: "Count it all",
+    name: "Count it All",
     oneLiner: "Count the pieces before they vanish — dots first, then shapes.",
     accent: "#ff4b3e",
     glyph: <TallyGlyph />,
@@ -153,6 +152,22 @@ type StreakMap = Partial<Record<GameId, number>>;
 
 const STREAKS_KEY = "polo-streaks";
 const PLAYED_KEY = "polo-played";
+const THEME_KEY = "polo-theme";
+
+type Theme = "light" | "dark";
+
+/* Saved choice wins; otherwise follow the OS */
+const loadTheme = (): Theme => {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === "dark" || saved === "light") return saved;
+  } catch {
+    /* storage unavailable */
+  }
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+};
 
 const loadStreaks = (): StreakMap => {
   try {
@@ -179,9 +194,26 @@ export default function App() {
      load opens in Color mode. */
   const [mode, setMode] = useState<PlayMode>("color");
   const [soundOn, setSoundOn] = useState(true);
+  const [theme, setTheme] = useState<Theme>(loadTheme);
   const [played, setPlayed] = useState<Set<GameId>>(loadPlayed);
   const [streaks, setStreaks] = useState<StreakMap>(loadStreaks);
   const [flood, setFlood] = useState<Flood | null>(null);
+
+  /* The toggle stamps the choice on <html>, where the token overrides live */
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      /* storage unavailable — theme stays session-only */
+    }
+  }, [theme]);
+
+  const handleToggleTheme = () => {
+    playTick();
+    triggerHaptic();
+    setTheme((t) => (t === "dark" ? "light" : "dark"));
+  };
 
   const currentList = mode === "color" ? gamesList : shapesList;
   const doneCount = currentList.filter((g) => played.has(g.id)).length;
@@ -274,16 +306,38 @@ export default function App() {
           <header className="flex items-center gap-3.5 pt-7 pb-5 border-b-[1.5px] border-line select-none">
             <PoloMark />
             <span className="font-display font-extrabold text-[17px] tracking-[0.02em]">POLO</span>
-            <div className="ml-auto flex items-center gap-5">
-              {!screen && <Streak total={currentList.length} done={doneCount} className="hidden sm:flex" />}
+            <div className="ml-auto flex items-center gap-3 sm:gap-5">
+              {/* The Spectrum self-check — top of the house, both modes */}
+              <button
+                id="vision-check-link"
+                onClick={handleOpenSpectrum}
+                className="font-mono font-extrabold text-[10.5px] tracking-[0.14em] uppercase text-ink inline-flex items-center gap-1.5 underline underline-offset-4 decoration-2 hover:decoration-play-blue cursor-pointer"
+              >
+                <span className="hidden sm:inline">Check your color vision</span>
+                <span className="sm:hidden">Vision check</span>
+                <svg width="13" height="12" viewBox="0 0 14 12" aria-hidden="true">
+                  <path d="M1.5 6h10.5M7.6 1.6 12 6l-4.4 4.4" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              <button
+                id="theme-toggle-btn"
+                onClick={handleToggleTheme}
+                aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+                className="btn-press bg-paper px-3 sm:px-4 py-2 font-mono font-extrabold text-[10.5px] tracking-[0.14em] uppercase flex items-center gap-2 cursor-pointer"
+                aria-pressed={theme === "dark"}
+              >
+                <i className={`w-2 h-2 rounded-full ${theme === "dark" ? "bg-ink" : "bg-play-yellow"}`} />
+                <span className="hidden sm:inline">{theme === "dark" ? "Lights off" : "Lights on"}</span>
+              </button>
               <button
                 id="sound-toggle-btn"
                 onClick={handleToggleSound}
-                className="btn-press bg-paper px-4 py-2 font-mono font-extrabold text-[10.5px] tracking-[0.14em] uppercase flex items-center gap-2 cursor-pointer"
+                aria-label={soundOn ? "Turn sound off" : "Turn sound on"}
+                className="btn-press bg-paper px-3 sm:px-4 py-2 font-mono font-extrabold text-[10.5px] tracking-[0.14em] uppercase flex items-center gap-2 cursor-pointer"
                 aria-pressed={soundOn}
               >
                 <i className={`w-2 h-2 rounded-full ${soundOn ? "bg-play-green" : "bg-line"}`} />
-                {soundOn ? "Sound on" : "Sound off"}
+                <span className="hidden sm:inline">{soundOn ? "Sound on" : "Sound off"}</span>
               </button>
             </div>
           </header>
@@ -294,7 +348,7 @@ export default function App() {
                 {/* Head with the quiet 3D moment behind it */}
                 <div className="relative mb-8 min-h-[128px] flex flex-col justify-center">
                   <Suspense fallback={null}>
-                    <AmbientBlocks />
+                    <AmbientBlocks charcoal={mode === "shapes"} />
                   </Suspense>
                   <h1 className="relative font-display font-extrabold text-3xl sm:text-5xl tracking-tight text-ink mb-3">
                     Train your eye.
@@ -361,19 +415,6 @@ export default function App() {
                   ))}
                 </div>
 
-                {/* The Spectrum self-check — visible in both modes */}
-                <div className="flex justify-center mt-9">
-                  <button
-                    id="vision-check-link"
-                    onClick={handleOpenSpectrum}
-                    className="font-mono font-extrabold text-[11px] tracking-[0.18em] uppercase text-ink inline-flex items-center gap-2 underline underline-offset-4 decoration-2 hover:decoration-play-blue cursor-pointer"
-                  >
-                    Check your color vision
-                    <svg width="13" height="12" viewBox="0 0 14 12" aria-hidden="true">
-                      <path d="M1.5 6h10.5M7.6 1.6 12 6l-4.4 4.4" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </button>
-                </div>
               </div>
             ) : (
               <div className="flex-1 flex flex-col">

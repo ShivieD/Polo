@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { BetweenRoundData } from "../../types";
 import { setupBetweenRound, interpolateHsl } from "../../utils/gameLogic";
 import { hslToCss } from "../../utils/color";
-import { GameHead, Panel, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, PassNote } from "../ui/Kit";
 import { BetweenGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -90,7 +90,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
   const handleDone = () => {
     if (stage !== "answer") return;
     const score = Math.round(100 * (1 - Math.abs(roundData.guessPosition - roundData.truePosition)));
-    onResult?.(score >= 85); // record the result once, at answer time
+    onResult?.(score >= 80); // 80 is the pass mark; passes feed the streak
     setRoundData((prev) => ({ ...prev, score }));
     setStage("reveal");
   };
@@ -105,13 +105,13 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
 
   const score = roundData.score ?? 0;
   const verdictHead =
-    score >= 95 ? "Surgical." : score >= 85 ? "Sharp eye." : score >= 65 ? "Close." : "Off the mark.";
+    score >= 95 ? "Surgical." : score >= 80 ? "Sharp eye." : score >= 60 ? "Close." : "Off the mark.";
   const verdictDetail =
     score >= 95
       ? "That is elite hue discrimination."
-      : score >= 85
+      : score >= 80
         ? "Within a whisker of true."
-        : score >= 65
+        : score >= 60
           ? "Watch the lightness, not just the hue."
           : "The gradient lies to everyone at first. Again.";
 
@@ -136,6 +136,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
             ]}
             glyph={<span className="scale-150 inline-block"><BetweenGlyph /></span>}
             onComplete={() => setStage("stimulus")}
+            note={<PassNote tone="color" />}
           />
         )}
 
@@ -203,7 +204,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
           <div className="flex flex-col items-center w-full gap-6">
             <VerdictHead
               id="between-reveal-verdict"
-              ok={score >= 85}
+              ok={score >= 80}
               headline={verdictHead}
               score={String(score)}
               scoreCaption="Accuracy / 100"

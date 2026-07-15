@@ -218,6 +218,17 @@ export const StepsTimeline: React.FC<{ steps: string[]; className?: string }> = 
   </ol>
 );
 
+/* The pass-mark note for score-based instruments: an inverted chip that
+   stays greyscale in Shapes mode ("mono") and may go yellow in dark mode
+   for Color-mode games ("color"). */
+export const PassNote: React.FC<{ tone?: "mono" | "color" }> = ({ tone = "mono" }) => (
+  <span
+    className={`polo-note ${tone === "color" ? "polo-note-color" : ""} font-mono font-extrabold text-[10.5px] tracking-[0.1em] uppercase rounded-2xl px-4 py-2.5 leading-relaxed max-w-xs`}
+  >
+    Note: you pass a round at 80+ — passes count toward your streak.
+  </span>
+);
+
 export const Ready: React.FC<{
   name: string;
   steps: string[];
@@ -229,7 +240,9 @@ export const Ready: React.FC<{
   immediate?: boolean;
   /* Shapes mode: greyscale CTA and countdown */
   mono?: boolean;
-}> = ({ name, steps, glyph, onComplete, ctaLabel = "Start round", immediate = false, mono = false }) => {
+  /* Optional slot between the steps and the CTA — e.g. the PassNote chip */
+  note?: React.ReactNode;
+}> = ({ name, steps, glyph, onComplete, ctaLabel = "Start round", immediate = false, mono = false, note }) => {
   const [counting, setCounting] = useState(false);
 
   if (counting) return <Countdown onComplete={onComplete} mono={mono} />;
@@ -244,7 +257,8 @@ export const Ready: React.FC<{
     >
       {glyph && <div className="mb-7 flex justify-center">{glyph}</div>}
       <h2 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-ink mb-7">{name}</h2>
-      <StepsTimeline steps={steps} className="max-w-sm mb-10" />
+      <StepsTimeline steps={steps} className={`max-w-sm ${note ? "mb-6" : "mb-10"}`} />
+      {note && <div className="mb-8 flex justify-center">{note}</div>}
       <Btn
         id="get-ready-start-btn"
         variant={mono ? "secondary" : "primary"}

@@ -24,6 +24,7 @@ const CHANGE_LABEL: Record<string, string> = {
   rotation: "tilted",
   size: "resized",
   radius: "re-cornered",
+  swap: "swapped out for a different shape",
 };
 
 /* Spot the Shift — the Shapes-mode parallel of Spot the Difference. Four
@@ -38,14 +39,14 @@ export const ShapeShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }
   const [countdown, setCountdown] = useState<number>(5);
   const autoAdvanceTimer = useRef<number | null>(null);
 
-  /* Fixed schedule: every round climbs one rung, capped at L6, and a wrong
-     answer never rolls it back. Next run goes straight to the countdown. */
+  /* Pass-gated: a catch climbs one rung (capped at L6); a miss replays the
+     same rung. Next run goes straight to the countdown. */
   const handleNextRound = () => {
     if (autoAdvanceTimer.current) {
       clearTimeout(autoAdvanceTimer.current);
       autoAdvanceTimer.current = null;
     }
-    const nextLevel = Math.min(6, level + 1);
+    const nextLevel = isUserCorrect ? Math.min(6, level + 1) : level;
     setLevel(nextLevel);
     setRoundData(setupShapeShiftRound(nextLevel));
     setRound((r) => r + 1);
@@ -140,8 +141,8 @@ export const ShapeShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }
             name="Spot the Shift"
             steps={[
               "Memorize four identical shapes — you get two seconds.",
-              "We shuffle the shutter, and one comes back slightly changed: tilted, resized, or re-cornered.",
-              "Tap the one that changed. The change shrinks every round.",
+              "We shuffle the shutter, and one comes back changed — sometimes swapped outright, sometimes barely tilted or resized.",
+              "Tap the one that changed. Catches raise the level; the mix skews subtler as you climb.",
             ]}
             glyph={<span className="scale-150 inline-block"><ShapeShiftGlyph /></span>}
             onComplete={() => setStage("stimulus")}

@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { shuffleArray } from "./shuffle";
+
 export interface HSL {
   h: number; // 0 - 360
   s: number; // 0 - 100
@@ -191,8 +193,7 @@ export function generateSwatchOptions(correctColor: HSL): { color: HSL; isCorrec
     options.push({ color: distractor, isCorrect: false });
   }
   
-  // Shuffle options
-  return options.sort(() => Math.random() - 0.5);
+  return shuffleArray(options);
 }
 
 export function hslToCss(color: HSL): string {
