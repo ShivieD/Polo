@@ -167,7 +167,8 @@ const THEME_KEY = "polo-theme";
 
 type Theme = "light" | "dark";
 
-/* Saved choice wins; otherwise follow the OS */
+/* Saved choice wins; otherwise the app always opens in light mode,
+   regardless of OS preference. */
 const loadTheme = (): Theme => {
   try {
     const saved = localStorage.getItem(THEME_KEY);
@@ -175,9 +176,7 @@ const loadTheme = (): Theme => {
   } catch {
     /* storage unavailable */
   }
-  return typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
+  return "light";
 };
 
 const loadStreaks = (): StreakMap => {

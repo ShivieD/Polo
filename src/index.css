@@ -42,18 +42,9 @@
  * values. The five chrome tokens are the only thing this ramp touches;
  * every utility already reads them through var(), and the playable
  * accents (red/yellow/blue/green) stay constant across both themes.
- * OS preference is the default; the header toggle stamps data-theme and
- * wins in both directions.
+ * Light is always the default on first load, regardless of OS preference —
+ * only the header toggle (which stamps data-theme) switches to dark.
  */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --color-paper: #0f0f0f;
-    --color-wash: #1a1a1a;
-    --color-line: #2e2e2e;
-    --color-mut: #9c9c9f;
-    --color-ink: #f4f4f5;
-  }
-}
 :root[data-theme="dark"] {
   --color-paper: #0f0f0f;
   --color-wash: #1a1a1a;
@@ -125,13 +116,6 @@ button {
   background: var(--color-play-yellow);
   color: var(--color-ink-fixed);
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .btn-accent {
-    --btn-edge: var(--btn-accent-color);
-    background: var(--color-wash);
-    color: var(--btn-accent-color);
-  }
-}
 :root[data-theme="dark"] .btn-accent {
   --btn-edge: var(--btn-accent-color);
   background: var(--color-wash);
@@ -143,13 +127,6 @@ button {
   background: var(--color-play-yellow);
   color: var(--color-ink-fixed);
   border: 1.5px solid transparent;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .chip-accent {
-    background: transparent;
-    color: var(--color-play-yellow);
-    border-color: var(--color-play-yellow);
-  }
 }
 :root[data-theme="dark"] .chip-accent {
   background: transparent;
@@ -277,11 +254,6 @@ input[type="range"].polo-range::-moz-range-thumb {
 .spectrum-tooltip {
   background: var(--color-ink-fixed);
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .spectrum-tooltip {
-    background: var(--color-play-yellow);
-  }
-}
 :root[data-theme="dark"] .spectrum-tooltip {
   background: var(--color-play-yellow);
 }
@@ -339,11 +311,6 @@ input[type="range"].polo-range::-moz-range-thumb {
   border-style: solid;
   border-width: 3px;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .echo-glyph-pad {
-    border-width: 1.8px;
-  }
-}
 :root[data-theme="dark"] .echo-glyph-pad {
   border-width: 1.8px;
 }
@@ -353,16 +320,8 @@ input[type="range"].polo-range::-moz-range-thumb {
 .mix-glyph-circle {
   mix-blend-mode: multiply;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .mix-glyph-circle {
-    mix-blend-mode: screen;
-  }
-}
 :root[data-theme="dark"] .mix-glyph-circle {
   mix-blend-mode: screen;
-}
-:root[data-theme="light"] .mix-glyph-circle {
-  mix-blend-mode: multiply;
 }
 
 /* Spectrum chips: hover cue lives in CSS (hover-capable pointers only) so
