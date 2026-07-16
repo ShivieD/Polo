@@ -1,0 +1,6 @@
+{
+  "name": "Polo",
+  "description": "A minimalist toolkit of six tiny noticing mini-games designed to anchor and calm your attention.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
