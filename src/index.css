@@ -20,6 +20,12 @@
   --color-line: #e8e8ee;
   --color-wash: #f6f6f8;
 
+  /* Fixed dark ink — never flips with theme. Reserved for text sitting on a
+     saturated accent fill (e.g. play-yellow), which needs a dark foreground
+     in both light and dark mode. Using themed --color-ink there would go
+     light-on-light the moment dark mode flips it. */
+  --color-ink-fixed: #111116;
+
   --color-play-red: #ff4b3e;
   --color-play-yellow: #ffc400;
   --color-play-blue: #2d6cf6;
@@ -28,10 +34,38 @@
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/*
+ * Dark theme token library — a true neutral grey ramp (R=G=B, zero blue
+ * tint), not the paper/ink pair inverted and tinted cool. Each step is
+ * picked independently for WCAG AA contrast against its neighbors, the
+ * same way the light ramp was, rather than by mechanically flipping hex
+ * values. The five chrome tokens are the only thing this ramp touches;
+ * every utility already reads them through var(), and the playable
+ * accents (red/yellow/blue/green) stay constant across both themes.
+ * OS preference is the default; the header toggle stamps data-theme and
+ * wins in both directions.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-paper: #0f0f0f;
+    --color-wash: #1a1a1a;
+    --color-line: #2e2e2e;
+    --color-mut: #9c9c9f;
+    --color-ink: #f4f4f5;
+  }
+}
+:root[data-theme="dark"] {
+  --color-paper: #0f0f0f;
+  --color-wash: #1a1a1a;
+  --color-line: #2e2e2e;
+  --color-mut: #9c9c9f;
+  --color-ink: #f4f4f5;
+}
+
 body {
   font-family: var(--font-sans);
-  background-color: #ffffff;
-  color: #111116;
+  background-color: var(--color-paper);
+  color: var(--color-ink);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -52,20 +86,23 @@ button {
 }
 
 /* Physical press button — pill shape (Chroma) + press depth (Playbox).
-   The hover/active transforms are the same curve the haptics will map to. */
+   The hover/active transforms are the same curve the haptics will map to.
+   The edge (border + hard under-shadow) reads --btn-edge so accent variants
+   can recolor the whole physical body in one place. */
 .btn-press {
-  border: 2px solid var(--color-ink);
+  --btn-edge: var(--color-ink);
+  border: 2px solid var(--btn-edge);
   border-radius: 999px;
-  box-shadow: 0 4px 0 var(--color-ink);
+  box-shadow: 0 4px 0 var(--btn-edge);
   transition: transform 0.09s ease, box-shadow 0.09s ease;
 }
 .btn-press:hover {
   transform: translateY(-1px);
-  box-shadow: 0 5px 0 var(--color-ink);
+  box-shadow: 0 5px 0 var(--btn-edge);
 }
 .btn-press:active {
   transform: translateY(4px);
-  box-shadow: 0 0 0 var(--color-ink);
+  box-shadow: 0 0 0 var(--btn-edge);
 }
 .btn-press:disabled {
   transform: none;
@@ -73,6 +110,51 @@ button {
   border-color: var(--color-line);
   color: var(--color-mut);
   cursor: not-allowed;
+}
+
+/*
+ * Accent CTA — dark-mode CTAs invert their construction. In light mode a
+ * primary button is a solid accent pill with fixed-dark text and an ink
+ * edge. On the dark canvas that same solid fill glows harshly and its
+ * near-white edge ring reads as a sticker; so in dark mode the fill goes
+ * dark (wash) and the accent moves to where the physicality lives — the
+ * border, the hard under-shadow, and the label.
+ */
+.btn-accent {
+  --btn-accent-color: var(--color-play-yellow);
+  background: var(--color-play-yellow);
+  color: var(--color-ink-fixed);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .btn-accent {
+    --btn-edge: var(--btn-accent-color);
+    background: var(--color-wash);
+    color: var(--btn-accent-color);
+  }
+}
+:root[data-theme="dark"] .btn-accent {
+  --btn-edge: var(--btn-accent-color);
+  background: var(--color-wash);
+  color: var(--btn-accent-color);
+}
+
+/* Accent chip (streak badges etc.) — same inversion, non-interactive */
+.chip-accent {
+  background: var(--color-play-yellow);
+  color: var(--color-ink-fixed);
+  border: 1.5px solid transparent;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .chip-accent {
+    background: transparent;
+    color: var(--color-play-yellow);
+    border-color: var(--color-play-yellow);
+  }
+}
+:root[data-theme="dark"] .chip-accent {
+  background: transparent;
+  color: var(--color-play-yellow);
+  border-color: var(--color-play-yellow);
 }
 
 /* Range sliders (Color Mixer): fat track, ink-ringed physical thumb */
@@ -146,6 +228,64 @@ input[type="range"].polo-range::-moz-range-thumb {
   100%      { transform: translate(0, 0); }
 }
 
+/* Greyscale loader for Shapes-mode interstitials — same musical chairs,
+   played in ink */
+.polo-loader-mono i:nth-child(1) { background: var(--color-ink); }
+.polo-loader-mono i:nth-child(2) { background: var(--color-mut); }
+.polo-loader-mono i:nth-child(3) { background: var(--color-line); }
+.polo-loader-mono i:nth-child(4) { background: var(--color-mut); }
+
+/* Shapes-mode tile→game wipe chrome. The figure itself is the IconWipe
+   component (that instrument's own tile icon, fading and settling in);
+   this only positions it centered over the transitioning screen. */
+.polo-wipe {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* One gentle nudge when a draggable dial first appears — "this rotates" */
+@media (prefers-reduced-motion: no-preference) {
+  .polo-wiggle {
+    animation: polo-wiggle 1.4s ease-in-out 0.5s 1;
+    transform-origin: 50% 50%;
+  }
+}
+@keyframes polo-wiggle {
+  0%, 100% { rotate: 0deg; }
+  30% { rotate: 5deg; }
+  70% { rotate: -5deg; }
+}
+
+/* The 80+ pass note on score-based instruments' instruction screens.
+   Inverted chip: ink-on-paper flips with the theme, same construction for
+   every game family — dark mode reads as a light grey chip with dark
+   text, whether the instrument is Color or Shapes. */
+.polo-note {
+  background: var(--color-ink);
+  color: var(--color-paper);
+}
+
+/* Spectrum's Level 2 tooltip — a small dark chip in light mode; in dark
+   mode the chip goes play-yellow instead of near-invisible near-black,
+   text stays white in both since both fills are dark enough to carry it. */
+.spectrum-tooltip {
+  background: var(--color-ink-fixed);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .spectrum-tooltip {
+    background: var(--color-play-yellow);
+  }
+}
+:root[data-theme="dark"] .spectrum-tooltip {
+  background: var(--color-play-yellow);
+}
+
 /* Countdown: digits stamp down like a press */
 @media (prefers-reduced-motion: no-preference) {
   .polo-stamp { animation: polo-stamp 0.55s var(--ease-spring); }
@@ -190,6 +330,47 @@ input[type="range"].polo-range::-moz-range-thumb {
   40%  { transform: translateY(-6px); }
   70%  { transform: translateY(1px); }
   100% { transform: translateY(0); }
+}
+
+/* Repeat the Pattern glyph pads — the border reads as too heavy against
+   the dark canvas at the same weight it has on white, so it thins 40%
+   in dark mode only. */
+.echo-glyph-pad {
+  border-style: solid;
+  border-width: 3px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .echo-glyph-pad {
+    border-width: 1.8px;
+  }
+}
+:root[data-theme="dark"] .echo-glyph-pad {
+  border-width: 1.8px;
+}
+
+/* Color Mixer glyph discs — blend mode flips with the theme: multiply
+   only works over a light canvas, screen only over a dark one */
+.mix-glyph-circle {
+  mix-blend-mode: multiply;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mix-glyph-circle {
+    mix-blend-mode: screen;
+  }
+}
+:root[data-theme="dark"] .mix-glyph-circle {
+  mix-blend-mode: screen;
+}
+:root[data-theme="light"] .mix-glyph-circle {
+  mix-blend-mode: multiply;
+}
+
+/* Spectrum chips: hover cue lives in CSS (hover-capable pointers only) so
+   it can never stick after a touch drag; motion owns transform for drags */
+@media (hover: hover) {
+  .spectrum-chip:hover {
+    filter: brightness(1.07);
+  }
 }
 
 /* Grid cell hover pop for color grids */

@@ -4,6 +4,7 @@
  */
 
 import { HSL, generateRandomColor, generateSwatchOptions } from "./color";
+import { shuffleArray } from "./shuffle";
 import {
   SwatchRoundData,
   MixRoundData,
@@ -94,7 +95,7 @@ export function setupEchoRound(params: EchoParams = getEchoParams(0)): EchoRound
     sequence = Array.from({ length: seqLen }, () => Math.floor(Math.random() * boxes));
   } else {
     // Random permutation of all pads
-    sequence = Array.from({ length: boxes }, (_, i) => i).sort(() => Math.random() - 0.5).slice(0, seqLen);
+    sequence = shuffleArray(Array.from({ length: boxes }, (_, i) => i)).slice(0, seqLen);
   }
 
   return {
@@ -281,8 +282,7 @@ export function setupTallyShapesRound(roundNumber: number = 1): TallyRoundData {
   const bare = scatterPoints(total);
 
   // Deal shapes out evenly, then shuffle positions so no shape clusters
-  const deck: TallyShape[] = bare.map((_, i) => TALLY_SHAPES[i % TALLY_SHAPES.length]);
-  deck.sort(() => Math.random() - 0.5);
+  const deck: TallyShape[] = shuffleArray(bare.map((_, i) => TALLY_SHAPES[i % TALLY_SHAPES.length]));
   const points = bare.map((p, i) => ({ ...p, shape: deck[i] }));
 
   const targetShape = TALLY_SHAPES[Math.floor(Math.random() * TALLY_SHAPES.length)];

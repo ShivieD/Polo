@@ -25,11 +25,13 @@ export const SwatchGlyph: React.FC = () => (
   </span>
 );
 
-/* Color Mixer: two circles blending */
+/* Color Mixer: two circles blending. The blend mode is theme-aware
+   (multiply on white, screen on dark) via the .mix-glyph-circle class —
+   multiply against a dark canvas collapses both discs to near-black. */
 export const MixGlyph: React.FC = () => (
   <span className="relative block w-[58px] h-[40px]" aria-hidden="true">
-    <i className="absolute left-0 top-[1px] w-[38px] h-[38px] rounded-full mix-blend-multiply" style={{ background: RED }} />
-    <i className="absolute right-0 top-[1px] w-[38px] h-[38px] rounded-full mix-blend-multiply" style={{ background: BLUE }} />
+    <i className="mix-glyph-circle absolute left-0 top-[1px] w-[38px] h-[38px] rounded-full" style={{ background: RED }} />
+    <i className="mix-glyph-circle absolute right-0 top-[1px] w-[38px] h-[38px] rounded-full" style={{ background: BLUE }} />
   </span>
 );
 
@@ -39,7 +41,7 @@ export const EchoGlyph: React.FC = () => (
     {[0, 1, 2, 3].map((i) => (
       <i
         key={i}
-        className="w-[21px] h-[21px] rounded-md border-[3px]"
+        className="echo-glyph-pad w-[21px] h-[21px] rounded-md"
         style={{ borderColor: INK, background: i === 1 ? YELLOW : "transparent" }}
       />
     ))}

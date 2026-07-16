@@ -5,11 +5,10 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
-import { SwatchRoundData } from "../../types";
-import { setupSwatchRound } from "../../utils/gameLogic";
-import { hslToCss, HSL } from "../../utils/color";
+import { FormRoundData } from "../../types";
+import { setupFormRound, explainFormMiss, FORM_EXPOSURE_MS, FORM_MAX_LEVEL } from "../../utils/shapeLogic";
 import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, Wobble } from "../ui/Kit";
-import { SwatchGlyph } from "../ui/Glyphs";
+import { FormGlyph, ShapeSvg } from "../ui/ShapeGlyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
 interface GameProps {
@@ -19,20 +18,28 @@ interface GameProps {
   streak?: number;
 }
 
-export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, accentColor }) => {
+/* Shape Match — the Shapes-mode parallel of Color Match. One silhouette,
+   two seconds, then six near-identical impostors. The level schedule
+   tightens distractor similarity: families → neighbors → aspect → weight
+   → 10% → 5% variations. Purely greyscale. */
+export const FormGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
+  const [level, setLevel] = useState(1);
   const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
-  const [roundData, setRoundData] = useState<SwatchRoundData>(() => setupSwatchRound());
+  const [roundData, setRoundData] = useState<FormRoundData>(() => setupFormRound(1));
   const [round, setRound] = useState(1);
   const [countdown, setCountdown] = useState<number>(4);
   const autoAdvanceTimer = useRef<number | null>(null);
 
-  /* Next run goes straight to the countdown — no detour to instructions */
+  /* Pass-gated: a correct answer climbs one rung (capped at L8); a miss
+     replays the same rung. Next run goes straight to the countdown. */
   const handleNextRound = () => {
     if (autoAdvanceTimer.current) {
       clearTimeout(autoAdvanceTimer.current);
       autoAdvanceTimer.current = null;
     }
-    setRoundData(setupSwatchRound());
+    const nextLevel = isUserCorrect ? Math.min(FORM_MAX_LEVEL, level + 1) : level;
+    setLevel(nextLevel);
+    setRoundData(setupFormRound(nextLevel));
     setRound((r) => r + 1);
     setStage("countdown");
     setCountdown(4);
@@ -40,18 +47,13 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, acce
 
   useEffect(() => {
     if (stage === "stimulus") {
-      const timer = setTimeout(() => setStage("answer"), 2000);
+      const timer = setTimeout(() => setStage("answer"), FORM_EXPOSURE_MS);
       return () => clearTimeout(timer);
     }
   }, [stage]);
 
-  const correct = roundData.options.find((o) => o.isCorrect)?.color;
-  const isUserCorrect =
-    !!roundData.userSelection &&
-    !!correct &&
-    correct.h === roundData.userSelection.h &&
-    correct.s === roundData.userSelection.s &&
-    correct.l === roundData.userSelection.l;
+  const correctIdx = roundData.options.findIndex((o) => o.isCorrect);
+  const isUserCorrect = roundData.userSelection === correctIdx;
 
   useEffect(() => {
     if (stage === "reveal") {
@@ -68,12 +70,12 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, acce
     }
   }, [stage]);
 
-  const handleSelectOption = (option: { color: HSL; isCorrect: boolean }) => {
+  const handleSelectOption = (idx: number) => {
     if (stage !== "answer") return;
     playTick();
     triggerHaptic();
-    onResult?.(option.isCorrect); // record the result once, at answer time
-    setRoundData((prev) => ({ ...prev, userSelection: option.color }));
+    onResult?.(idx === correctIdx); // record the result once, at answer time
+    setRoundData((prev) => ({ ...prev, userSelection: idx }));
     setStage("reveal");
   };
 
@@ -84,25 +86,25 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, acce
     `Round ${String(round).padStart(2, "0")}`;
 
   return (
-    <div id="swatch-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Color Match" status={status} onBack={onBack} streak={streak} />
+    <div id="form-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
+      <GameHead title="Shape Match" status={status} onBack={onBack} streak={streak} mono level={level} />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
           <Ready
-            name="Color Match"
+            name="Shape Match"
             steps={[
-              "Memorize one color — you get two seconds.",
+              "Memorize one shape — you get two seconds.",
               "It hides among five near-identical impostors.",
-              "Tap the exact color you saw.",
+              "Tap the exact shape you saw. Every correct answer pulls the impostors a little closer.",
             ]}
-            glyph={<span className="scale-150 inline-block"><SwatchGlyph /></span>}
+            glyph={<span className="scale-150 inline-block"><FormGlyph /></span>}
             onComplete={() => setStage("stimulus")}
-            accentColor={accentColor}
+            mono
           />
         )}
 
-        {stage === "countdown" && <Countdown onComplete={() => setStage("stimulus")} />}
+        {stage === "countdown" && <Countdown onComplete={() => setStage("stimulus")} mono />}
 
         {stage === "stimulus" && (
           <motion.div
@@ -112,13 +114,14 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, acce
             className="flex flex-col items-center gap-6"
           >
             <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-mut">
-              Memorize this color
+              Memorize this shape
             </span>
             <div
-              id="swatch-stimulus-box"
-              className="w-52 h-52 sm:w-60 sm:h-60 rounded-3xl border-[1.5px] border-line"
-              style={{ backgroundColor: hslToCss(roundData.targetColor) }}
-            />
+              id="form-stimulus-box"
+              className="w-52 h-52 sm:w-60 sm:h-60 rounded-3xl border-[1.5px] border-line bg-paper p-6"
+            >
+              <ShapeSvg spec={roundData.target} />
+            </div>
           </motion.div>
         )}
 
@@ -131,15 +134,16 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, acce
               {roundData.options.map((opt, idx) => (
                 <motion.button
                   key={idx}
-                  id={`swatch-option-${idx}`}
-                  onClick={() => handleSelectOption(opt)}
+                  id={`form-option-${idx}`}
+                  onClick={() => handleSelectOption(idx)}
                   initial={{ opacity: 0, y: 18, scale: 0.9 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ delay: idx * 0.05, type: "spring", stiffness: 380, damping: 20 }}
-                  className="cell-pop aspect-square w-full rounded-2xl cursor-pointer"
-                  style={{ backgroundColor: hslToCss(opt.color) }}
-                  aria-label={`Color option ${idx + 1}`}
-                />
+                  className="cell-pop aspect-square w-full rounded-2xl border-[1.5px] border-line bg-paper p-3 cursor-pointer"
+                  aria-label={`Shape option ${idx + 1}`}
+                >
+                  <ShapeSvg spec={opt.spec} />
+                </motion.button>
               ))}
             </div>
           </div>
@@ -148,43 +152,40 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, acce
         {stage === "reveal" && (
           <div className="flex flex-col items-center gap-7">
             <VerdictHead
-              id="swatch-reveal-verdict"
+              id="form-reveal-verdict"
               ok={isUserCorrect}
               headline={isUserCorrect ? "Spot on." : "An impostor got you."}
+              mono
             />
 
             <Wobble active={!isUserCorrect} className="w-full max-w-sm flex justify-center">
-              {/* Every color stays at full strength; tags sit BELOW the
-                  swatches so they never blend into a similar color */}
+              {/* Truth revealed alongside the guess — solid ink outline for
+                  the correct shape, thin dashed mid-grey for a wrong pick */}
               <div className="grid grid-cols-3 gap-3 w-full">
                 {roundData.options.map((opt, idx) => {
-                  const isSelected =
-                    !!roundData.userSelection &&
-                    roundData.userSelection.h === opt.color.h &&
-                    roundData.userSelection.s === opt.color.s &&
-                    roundData.userSelection.l === opt.color.l;
-
+                  const isSelected = roundData.userSelection === idx;
                   return (
                     <div key={idx} className="flex flex-col items-center gap-1.5">
                       <div
-                        id={`swatch-reveal-option-${idx}`}
-                        className={`aspect-square w-full rounded-2xl ${
+                        id={`form-reveal-option-${idx}`}
+                        className={`aspect-square w-full rounded-2xl bg-paper p-3 ${
                           opt.isCorrect
-                            ? "ring-[3px] ring-ink ring-offset-2 ring-offset-paper"
+                            ? "border-[3px] border-ink"
                             : isSelected
-                              ? "ring-2 ring-play-red ring-offset-2 ring-offset-paper"
-                              : ""
+                              ? "border-2 border-dashed border-mut"
+                              : "border-[1.5px] border-line"
                         }`}
-                        style={{ backgroundColor: hslToCss(opt.color) }}
-                      />
+                      >
+                        <ShapeSvg spec={opt.spec} />
+                      </div>
                       <span className="h-5 flex items-center">
                         {opt.isCorrect && (
-                          <span className="font-mono font-extrabold text-[9.5px] tracking-[0.1em] uppercase bg-play-green text-paper rounded-full px-2 py-0.5">
+                          <span className="font-mono font-extrabold text-[9.5px] tracking-[0.1em] uppercase bg-ink text-paper rounded-full px-2 py-0.5">
                             Correct
                           </span>
                         )}
                         {isSelected && !opt.isCorrect && (
-                          <span className="font-mono font-extrabold text-[9.5px] tracking-[0.1em] uppercase bg-ink text-paper rounded-full px-2 py-0.5">
+                          <span className="font-mono font-extrabold text-[9.5px] tracking-[0.1em] uppercase text-mut border border-dashed border-mut rounded-full px-2 py-0.5">
                             Your
                           </span>
                         )}
@@ -199,12 +200,14 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, acce
               detail={
                 isUserCorrect
                   ? "You picked the exact specimen from the lineup."
-                  : "The correct color is ringed in ink — compare it against your pick."
+                  : roundData.userSelection !== null
+                    ? explainFormMiss(roundData.target, roundData.options[roundData.userSelection].spec)
+                    : "The correct shape wears the solid ink outline."
               }
             />
 
             <div className="flex flex-col items-center gap-4">
-              <Btn id="swatch-next-btn" variant="secondary" onClick={handleNextRound}>Next color</Btn>
+              <Btn id="form-next-btn" variant="secondary" onClick={handleNextRound}>Next shape</Btn>
               <NextIn seconds={countdown} />
             </div>
           </div>

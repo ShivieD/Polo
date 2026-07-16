@@ -21,6 +21,10 @@ interface GameProps {
 
 type ShiftStage = "getReady" | "countdown" | "stimulus" | "interstitial" | "answer" | "reveal";
 
+/* The dark-mode CTA reads yellow rather than the tile's own blue — blue
+   read poorly against the dark wash fill, yellow carries more contrast. */
+const CTA_ACCENT = "#ffc400";
+
 export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const [stage, setStage] = useState<ShiftStage>("getReady");
   const [roundData, setRoundData] = useState<ShiftRoundData>(() => setupShiftRound());
@@ -99,6 +103,7 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
             ]}
             glyph={<span className="scale-150 inline-block"><ShiftGlyph /></span>}
             onComplete={() => setStage("stimulus")}
+            accentColor={CTA_ACCENT}
           />
         )}
 

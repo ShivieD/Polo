@@ -75,7 +75,7 @@ const CheckDot: React.FC<{ on: boolean }> = ({ on }) => (
   </span>
 );
 
-export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
+export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accentColor }) => {
   const [mode, setMode] = useState<TallyMode>("dots");
   const [shapesUnlocked, setShapesUnlocked] = useState<boolean>(() => {
     try {
@@ -273,7 +273,7 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
 
   return (
     <div id="tally-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Count it all" status={status} onBack={onBack} streak={streak} />
+      <GameHead title="Count it All" status={status} onBack={onBack} streak={streak} />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "modePick" && (
@@ -285,7 +285,7 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
             className="flex flex-col items-center text-center max-w-2xl mx-auto py-8 select-none"
           >
             <div className="mb-7 flex justify-center"><span className="scale-150 inline-block"><TallyGlyph /></span></div>
-            <h2 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-ink mb-3">Count it all</h2>
+            <h2 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-ink mb-3">Count it All</h2>
             <p className="text-[16px] text-mut leading-relaxed mb-7">Pick your challenge, then keep playing that way.</p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full mb-9">
@@ -293,7 +293,7 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
                 id="tally-mode-dots"
                 onClick={() => { playTick(); triggerHaptic(); setMode("dots"); }}
                 className={`flex items-center gap-4 text-left rounded-2xl border-2 p-4 cursor-pointer transition-colors ${
-                  mode === "dots" ? "border-play-yellow bg-[#FFF8E1]" : "border-line bg-paper hover:border-mut"
+                  mode === "dots" ? "border-play-yellow bg-wash" : "border-line bg-paper hover:border-mut"
                 }`}
                 aria-pressed={mode === "dots"}
               >
@@ -310,7 +310,7 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
                 id="tally-mode-shapes"
                 onClick={() => { playTick(); triggerHaptic(); setMode("shapes"); }}
                 className={`flex items-center gap-4 text-left rounded-2xl border-2 p-4 cursor-pointer transition-colors ${
-                  mode === "shapes" ? "border-play-yellow bg-[#FFF8E1]" : "border-line bg-paper hover:border-mut"
+                  mode === "shapes" ? "border-play-yellow bg-wash" : "border-line bg-paper hover:border-mut"
                 }`}
                 aria-pressed={mode === "shapes"}
               >
@@ -325,18 +325,19 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
               </button>
             </div>
 
-            <Btn id="tally-start-btn" onClick={() => startRun(mode)}>Start run</Btn>
+            <Btn id="tally-start-btn" accent={accentColor} onClick={() => startRun(mode)}>Start run</Btn>
           </motion.div>
         )}
 
         {stage === "getReady" && (
           <Ready
-            name="Count it all"
+            name="Count it All"
             steps={readySteps}
             ctaLabel={shapesUnlocked ? "Choose mode" : "Start round"}
             immediate={shapesUnlocked}
             glyph={<span className="scale-150 inline-block"><TallyGlyph /></span>}
             onComplete={() => setStage(shapesUnlocked ? "modePick" : "stimulus")}
+            accentColor={accentColor}
           />
         )}
 
@@ -348,7 +349,7 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
               {roundData.mode === "shapes" ? (
                 <>
                   Count only the {targetLabel}
-                  <span className="w-5 h-5 inline-block"><PieceShape shape={roundData.targetShape} color="#111116" /></span>
+                  <span className="w-5 h-5 inline-block"><PieceShape shape={roundData.targetShape} color="var(--color-ink)" /></span>
                 </>
               ) : (
                 "Count the pieces"
@@ -363,7 +364,7 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
             <span className="font-display font-extrabold text-xl sm:text-2xl tracking-tight text-ink flex items-center gap-3 text-center">
               How many {targetLabel} landed?
               {roundData.mode === "shapes" && (
-                <span className="w-6 h-6 inline-block shrink-0"><PieceShape shape={roundData.targetShape} color="#111116" /></span>
+                <span className="w-6 h-6 inline-block shrink-0"><PieceShape shape={roundData.targetShape} color="var(--color-ink)" /></span>
               )}
             </span>
             <div className="grid grid-cols-4 gap-3 w-full max-w-sm">
