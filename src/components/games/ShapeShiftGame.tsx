@@ -3,11 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { ShapeShiftRoundData } from "../../types";
 import { setupShapeShiftRound } from "../../utils/shapeLogic";
-import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, Loader, Wobble } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, Btn, Loader, Wobble } from "../ui/Kit";
+import { useProgression, LivesBar, OutcomeNote } from "../ui/Progress";
+import { RunOutcome } from "../../utils/progression";
 import { ShapeShiftGlyph, ShapeSvg } from "../ui/ShapeGlyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -31,27 +33,18 @@ const CHANGE_LABEL: Record<string, string> = {
    identical shapes, a blink, and one comes back changed in rotation, size
    or corner radius (never hue — there is none). The level schedule shrinks
    the change. Purely greyscale. */
-export const ShapeShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
-  const [level, setLevel] = useState(1);
+export const ShapeShiftGame: React.FC<GameProps> = ({ onBack, onResult }) => {
+  const prog = useProgression("shapeshift");
   const [stage, setStage] = useState<Stage>("getReady");
-  const [roundData, setRoundData] = useState<ShapeShiftRoundData>(() => setupShapeShiftRound(1));
+  const [roundData, setRoundData] = useState<ShapeShiftRoundData>(() => setupShapeShiftRound(prog.ramp));
   const [round, setRound] = useState(1);
-  const [countdown, setCountdown] = useState<number>(5);
-  const autoAdvanceTimer = useRef<number | null>(null);
+  const [lastOutcome, setLastOutcome] = useState<RunOutcome | null>(null);
 
-  /* Pass-gated: a catch climbs one rung (capped at L6); a miss replays the
-     same rung. Next run goes straight to the countdown. */
+  /* Next run waits for the CTA — no auto-advance */
   const handleNextRound = () => {
-    if (autoAdvanceTimer.current) {
-      clearTimeout(autoAdvanceTimer.current);
-      autoAdvanceTimer.current = null;
-    }
-    const nextLevel = isUserCorrect ? Math.min(6, level + 1) : level;
-    setLevel(nextLevel);
-    setRoundData(setupShapeShiftRound(nextLevel));
+    setRoundData(setupShapeShiftRound(prog.ramp));
     setRound((r) => r + 1);
     setStage("countdown");
-    setCountdown(5);
   };
 
   useEffect(() => {
@@ -68,18 +61,7 @@ export const ShapeShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }
   const isUserCorrect = roundData.userSelection === roundData.changedIndex;
 
   useEffect(() => {
-    if (stage === "reveal") {
-      playRevealInterval();
-
-      const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
-      const timer = setTimeout(handleNextRound, 5000);
-      autoAdvanceTimer.current = timer as unknown as number;
-
-      return () => {
-        clearInterval(interval);
-        clearTimeout(timer);
-      };
-    }
+    if (stage === "reveal") playRevealInterval();
   }, [stage]);
 
   const handleSelect = (idx: number) => {
@@ -87,16 +69,10 @@ export const ShapeShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }
     playTick();
     triggerHaptic();
     onResult?.(idx === roundData.changedIndex); // record the result once, at answer time
+    setLastOutcome(prog.report(idx === roundData.changedIndex, idx === roundData.changedIndex ? 100 : 0));
     setRoundData((prev) => ({ ...prev, userSelection: idx }));
     setStage("reveal");
   };
-
-  const status =
-    stage === "stimulus" ? "Memorize all four" :
-    stage === "interstitial" ? "Shuffling" :
-    stage === "answer" ? "Which one changed?" :
-    stage === "reveal" ? `Next in ${countdown}s` :
-    `Round ${String(round).padStart(2, "0")}`;
 
   /* Uniform rounds draw every cell from baseSpec; lineup rounds give each
      cell its own shape via cellSpecs */
@@ -136,8 +112,17 @@ export const ShapeShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }
   );
 
   return (
-    <div id="shapeshift-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Spot the Shift" status={status} onBack={onBack} streak={streak} mono level={level} />
+    <div id="shapeshift-game-container" className="w-full flex flex-col flex-1 max-w-3xl mx-auto">
+      <GameHead
+        title="Spot the Shift"
+        onBack={onBack}
+        streak={prog.streak}
+        points={prog.points}
+        mono
+        lives={<LivesBar lives={prog.lives} />}
+        onReset={prog.requestReset}
+        gameId="shapeshift"
+      />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
@@ -186,22 +171,24 @@ export const ShapeShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center gap-7">
+          <div className="flex flex-col items-center gap-5">
             <VerdictHead
               id="shapeshift-reveal-verdict"
               ok={isUserCorrect}
               headline={isUserCorrect ? "Shift detected." : "It slipped past."}
               mono
             />
+            <OutcomeNote outcome={lastOutcome} />
 
-            <Wobble active={!isUserCorrect} className="w-full max-w-sm">
+            <Wobble active={!isUserCorrect} className="w-full max-w-sm sm:max-w-3xl">
               {/* Before and after — the changed shape wears the solid ink
-                  outline, a wrong pick the thin dashed mid-grey one */}
-              <div className="flex flex-col gap-6 w-full">
+                  outline, a wrong pick the thin dashed mid-grey one. Side by
+                  side from sm up so the verdict and CTA stay in the fold. */}
+              <div className="flex flex-col sm:flex-row sm:justify-center gap-6 sm:gap-10 w-full">
                 {(["Before", "After"] as const).map((label) => {
                   const after = label === "After";
                   return (
-                    <div key={label}>
+                    <div key={label} className="sm:flex-1 sm:max-w-sm">
                       <div className="font-mono font-extrabold text-[11px] tracking-[0.16em] uppercase text-mut mb-2.5">
                         {label}
                       </div>
@@ -253,13 +240,11 @@ export const ShapeShiftGame: React.FC<GameProps> = ({ onBack, onResult, streak }
               }
             />
 
-            <div className="flex flex-col items-center gap-4">
-              <Btn id="shapeshift-next-btn" variant="secondary" onClick={handleNextRound}>Next four</Btn>
-              <NextIn seconds={countdown} />
-            </div>
+            <Btn id="shapeshift-next-btn" variant="secondary" onClick={handleNextRound}>Next four</Btn>
           </div>
         )}
       </div>
+      {prog.overlays}
     </div>
   );
 };

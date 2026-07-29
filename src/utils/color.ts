@@ -159,12 +159,14 @@ export function generateRandomColor(): HSL {
 }
 
 // Generate an array of 5 near distractors + the correct color, shuffled.
-export function generateSwatchOptions(correctColor: HSL): { color: HSL; isCorrect: boolean }[] {
+export function generateSwatchOptions(
+  correctColor: HSL,
+  distractors = 5
+): { color: HSL; isCorrect: boolean }[] {
   const options: { color: HSL; isCorrect: boolean }[] = [{ color: correctColor, isCorrect: true }];
-  
-  // Try to make them distinct enough to be solvable, but close enough to be near-distractors.
-  // We'll generate 5 different distractors.
-  for (let i = 0; i < 5; i++) {
+
+  // Distinct enough to be solvable, close enough to be near-distractors.
+  for (let i = 0; i < distractors; i++) {
     let attempts = 0;
     let distractor: HSL = { h: 0, s: 0, l: 0 };
     let tooClose = true;
@@ -194,6 +196,33 @@ export function generateSwatchOptions(correctColor: HSL): { color: HSL; isCorrec
   }
   
   return shuffleArray(options);
+}
+
+export function rgbToHsl(r: number, g: number, b: number): HSL {
+  const rn = r / 255, gn = g / 255, bn = b / 255;
+  const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l: Math.round(l * 100) };
+  const d = max - min;
+  const s2 = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) * 60;
+  else if (max === gn) h = ((bn - rn) / d + 2) * 60;
+  else h = ((rn - gn) / d + 4) * 60;
+  return { h: Math.round(h), s: Math.round(s2 * 100), l: Math.round(l * 100) };
+}
+
+/* Perceived "paint mix" of N colors: the straight RGB average. Used by the
+   Color Mixer's overlap levels so the scored value and the rendered lens
+   are the same number. */
+export function mixHslAverage(colors: HSL[]): HSL {
+  let r = 0, g = 0, b = 0;
+  for (const c of colors) {
+    const [cr, cg, cb] = hslToRgb(c.h, c.s, c.l);
+    r += cr; g += cg; b += cb;
+  }
+  const n = colors.length;
+  return rgbToHsl(r / n, g / n, b / n);
 }
 
 export function hslToCss(color: HSL): string {

@@ -131,13 +131,6 @@ export const Spectrum: React.FC<SpectrumProps> = ({ onBack }) => {
         ? `Your color sorting was mostly accurate, with some mismatches in the ${regionText} range.`
         : `Your color sorting differed noticeably from the reference in the ${regionText} range.`;
 
-  const status =
-    stage === "arrange" ? "No timer" :
-    stage === "arrange2" ? "Level 2 · No timer" :
-    stage === "result" ? "Result" :
-    stage === "result2" ? "Level 2 · Result" :
-    "Self-check";
-
   /* One chip. Anchors wear the ink border and don't drag. */
   const chipClass = (anchor: boolean, h: string) =>
     `${h} flex-1 rounded-md ${anchor ? "border-2 border-ink" : "border-[1.5px] border-line"}`;
@@ -291,7 +284,7 @@ export const Spectrum: React.FC<SpectrumProps> = ({ onBack }) => {
 
   return (
     <div id="spectrum-container" className="w-full flex flex-col flex-1 max-w-2xl mx-auto">
-      <GameHead title="Spectrum" status={status} onBack={onBack} />
+      <GameHead title="Spectrum" onBack={onBack} />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "intro" && (

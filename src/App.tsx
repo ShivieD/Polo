@@ -31,6 +31,8 @@ import { SquircleGame } from "./components/games/SquircleGame";
 import { ShapeShiftGame } from "./components/games/ShapeShiftGame";
 import { ShapeTallyGame } from "./components/games/ShapeTallyGame";
 import { Spectrum } from "./components/Spectrum";
+import { Leaderboard } from "./components/Leaderboard";
+import { getAllProgress } from "./utils/progression";
 import { RockerSwitch } from "./components/ui/RockerSwitch";
 import { IconWipe } from "./components/ui/IconWipe";
 
@@ -199,7 +201,7 @@ const loadPlayed = (): Set<GameId> => {
 
 export default function App() {
   /* One screen variable: a game, the Spectrum self-check, or home (null) */
-  const [screen, setScreen] = useState<GameId | "spectrum" | null>(null);
+  const [screen, setScreen] = useState<GameId | "spectrum" | "leaderboard" | null>(null);
   /* Which tile set is showing. Deliberately not persisted — every fresh
      load opens in Color mode. */
   const [mode, setMode] = useState<PlayMode>("color");
@@ -307,10 +309,15 @@ export default function App() {
     streak: streaks[id] ?? 0,
   });
 
+  /* Home tiles read the progression engine's live streaks — re-read on
+     every render; returning from a game re-renders home anyway */
+  const engineProgress = getAllProgress();
+  const tileStreak = (id: GameId) => engineProgress[id]?.streakCurrent ?? 0;
+
   return (
     <MotionConfig reducedMotion="user">
       <div className="min-h-screen bg-paper text-ink flex flex-col font-sans antialiased">
-        <div className="flex-1 w-full max-w-5xl mx-auto px-5 sm:px-8 flex flex-col">
+        <div className="flex-1 w-full max-w-6xl mx-auto px-5 sm:px-8 flex flex-col">
 
           {/* Top bar — wordmark, session streak, sound */}
           <header className="flex items-center gap-3.5 pt-7 pb-5 border-b-[1.5px] border-line select-none">
@@ -325,6 +332,21 @@ export default function App() {
               >
                 <span className="hidden sm:inline">Check your color vision</span>
                 <span className="sm:hidden">Vision check</span>
+              </button>
+              <button
+                id="leaderboard-link"
+                onClick={() => {
+                  if (flood) return;
+                  playTick();
+                  triggerHaptic();
+                  setScreen("leaderboard");
+                }}
+                className="btn-press bg-paper px-3 sm:px-4 py-2 font-mono font-extrabold text-[10.5px] tracking-[0.14em] uppercase flex items-center gap-2 cursor-pointer text-ink"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M5 3h14v2h3v4c0 2.4-1.8 4.4-4.1 4.9A7 7 0 0 1 13 17.9V20h4v2H7v-2h4v-2.1a7 7 0 0 1-4.9-3.9C3.8 13.4 2 11.4 2 9V5h3V3Zm0 4H4v2c0 1.2.7 2.2 1.7 2.7A7 7 0 0 1 5 9V7Zm15 2V7h-1v2c0 .9-.2 1.8-.7 2.7 1-.5 1.7-1.5 1.7-2.7Z" />
+                </svg>
+                <span className="hidden sm:inline">Leaderboard</span>
               </button>
               <button
                 id="theme-toggle-btn"
@@ -385,9 +407,9 @@ export default function App() {
                       <span className="font-display font-medium text-[16px] text-ink mb-1.5">{game.name}</span>
                       <span className="text-[14px] text-mut leading-relaxed mb-5">{game.oneLiner}</span>
                       <span className="mt-auto flex items-center justify-between">
-                        {(streaks[game.id] ?? 0) > 0 ? (
+                        {tileStreak(game.id) > 0 ? (
                           <span className="font-mono font-extrabold text-[10.5px] tracking-[0.14em] uppercase chip-accent rounded-full px-2.5 py-1 tabular-nums">
-                            Streak {streaks[game.id]}
+                            Streak {tileStreak(game.id)}
                           </span>
                         ) : (
                           <span className="font-mono font-medium text-[11px] tracking-[0.14em] uppercase text-mut">
@@ -421,6 +443,7 @@ export default function App() {
                 {screen === "shapeshift" && <ShapeShiftGame {...gameProps("shapeshift")} />}
                 {screen === "shapetally" && <ShapeTallyGame {...gameProps("shapetally")} />}
                 {screen === "spectrum" && <Spectrum onBack={handleBackToHome} />}
+                {screen === "leaderboard" && <Leaderboard onBack={handleBackToHome} />}
               </div>
             )}
           </main>

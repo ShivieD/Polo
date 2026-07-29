@@ -6,8 +6,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { TallyRoundData, TallyMode, TallyShape } from "../../types";
-import { setupTallyRound } from "../../utils/gameLogic";
-import { GameHead, Ready, VerdictHead, VerdictBody, NextIn, Btn, Wobble, Countdown } from "../ui/Kit";
+import { setupTallyRound, getTallyPopSpeed } from "../../utils/gameLogic";
+import { GameHead, Ready, VerdictHead, VerdictBody, Btn, Wobble, Countdown } from "../ui/Kit";
+import { useProgression, LivesBar, RunTimer, OutcomeNote } from "../ui/Progress";
+import { RunOutcome } from "../../utils/progression";
 import { TallyGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -75,7 +77,8 @@ const CheckDot: React.FC<{ on: boolean }> = ({ on }) => (
   </span>
 );
 
-export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accentColor }) => {
+export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }) => {
+  const prog = useProgression("tally");
   const [mode, setMode] = useState<TallyMode>("dots");
   const [shapesUnlocked, setShapesUnlocked] = useState<boolean>(() => {
     try {
@@ -90,10 +93,10 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accen
   const [justUnlocked, setJustUnlocked] = useState(false);
   const [dotsRun, setDotsRun] = useState<number>(1);
   const [shapesRun, setShapesRun] = useState<number>(1);
-  const [roundData, setRoundData] = useState<TallyRoundData>(() => setupTallyRound(1, "dots"));
+  const [roundData, setRoundData] = useState<TallyRoundData>(() => setupTallyRound(prog.ramp, "dots"));
   const [visibleDotsCount, setVisibleDotsCount] = useState<number>(0);
-  const [countdown, setCountdown] = useState<number>(5);
-  const autoAdvanceTimer = useRef<number | null>(null);
+  const [lastOutcome, setLastOutcome] = useState<RunOutcome | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
   /* Set when the player unlocks shapes mid-run, so the next run detours to
      the picker exactly once — after that runs flow straight through. */
   const showPickerNext = useRef(false);
@@ -106,10 +109,6 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accen
      current mode — unless the player just unlocked shapes, in which case they
      get the picker once to choose. */
   const handleNextRound = () => {
-    if (autoAdvanceTimer.current) {
-      clearTimeout(autoAdvanceTimer.current);
-      autoAdvanceTimer.current = null;
-    }
     let nextRun = roundNumber;
     if (isUserCorrect) {
       nextRun = roundNumber + 1;
@@ -117,14 +116,14 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accen
       else setShapesRun(nextRun);
     }
     setJustUnlocked(false);
-    setCountdown(5);
+    setTimedOut(false);
 
     if (showPickerNext.current) {
       showPickerNext.current = false;
       setStage("modePick");
       return;
     }
-    setRoundData(setupTallyRound(nextRun, mode));
+    setRoundData(setupTallyRound(prog.ramp, mode));
     setVisibleDotsCount(0);
     setStage("countdown");
   };
@@ -132,7 +131,7 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accen
   /* Chosen from the mode picker — build the round and drop into the countdown */
   const startRun = (chosen: TallyMode) => {
     setMode(chosen);
-    setRoundData(setupTallyRound(runForMode(chosen), chosen));
+    setRoundData(setupTallyRound(prog.ramp, chosen));
     setVisibleDotsCount(0);
     setStage("countdown");
   };
@@ -144,10 +143,11 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accen
       setVisibleDotsCount(0);
       let dotsPopped = 0;
       const totalDots = roundData.points.length;
+      /* Tempo tightens continuously along the run ramp — no cliffs */
       const popSpeed =
         roundData.mode === "shapes"
-          ? 150
-          : Math.max(30, Math.round(250 / (1 + (roundNumber - 1) * 0.45)));
+          ? Math.round(getTallyPopSpeed(prog.ramp) * 0.85)
+          : getTallyPopSpeed(prog.ramp);
 
       const interval = setInterval(() => {
         if (dotsPopped < totalDots) {
@@ -180,14 +180,6 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accen
         }
       }
 
-      const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
-      const timer = setTimeout(handleNextRound, 5000);
-      autoAdvanceTimer.current = timer as unknown as number;
-
-      return () => {
-        clearInterval(interval);
-        clearTimeout(timer);
-      };
     }
   }, [stage]);
 
@@ -195,8 +187,20 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accen
     if (stage !== "answer") return;
     playTick();
     triggerHaptic();
-    onResult?.(num === roundData.trueCount); // record the result once, at answer time
+    const correct = num === roundData.trueCount;
+    onResult?.(correct); // record the result once, at answer time
+    setLastOutcome(prog.report(correct, correct ? 100 : 0));
     setRoundData((prev) => ({ ...prev, userSelection: num }));
+    setStage("reveal");
+  };
+
+  /* Clock ran out with no pick — counts as a miss */
+  const handleTimeout = () => {
+    if (stage !== "answer") return;
+    triggerHaptic();
+    onResult?.(false);
+    setTimedOut(true);
+    setLastOutcome(prog.report(false, 0));
     setStage("reveal");
   };
 
@@ -215,12 +219,6 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accen
         "Pick how many landed — correct runs get faster and busier.",
         `Conquer a board of ${UNLOCK_AT}+ to unlock shape counting.`,
       ];
-
-  const status =
-    stage === "stimulus" ? "Count them" :
-    stage === "answer" ? "How many?" :
-    stage === "reveal" ? `Next in ${countdown}s` :
-    `Run ${String(roundNumber).padStart(2, "0")}`;
 
   const board = (size: string, dotScale: number, animated: boolean) => (
     <div
@@ -272,8 +270,17 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accen
   );
 
   return (
-    <div id="tally-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Count it All" status={status} onBack={onBack} streak={streak} />
+    <div id="tally-game-container" className="w-full flex flex-col flex-1 max-w-3xl mx-auto">
+      <GameHead
+        title="Count it All"
+        onBack={onBack}
+        streak={prog.streak}
+        points={prog.points}
+        gameId="tally"
+        accent={accentColor}
+        lives={<LivesBar lives={prog.lives} />}
+        onReset={prog.requestReset}
+      />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "modePick" && (
@@ -282,13 +289,13 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accen
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ type: "spring", stiffness: 320, damping: 26 }}
-            className="flex flex-col items-center text-center max-w-2xl mx-auto py-8 select-none"
+            className="flex flex-col items-center text-center max-w-3xl mx-auto py-2 select-none"
           >
-            <div className="mb-7 flex justify-center"><span className="scale-150 inline-block"><TallyGlyph /></span></div>
+            <div className="mb-5 flex justify-center"><span className="scale-150 inline-block"><TallyGlyph /></span></div>
             <h2 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-ink mb-3">Count it All</h2>
-            <p className="text-[16px] text-mut leading-relaxed mb-7">Pick your challenge, then keep playing that way.</p>
+            <p className="text-[16px] text-mut leading-relaxed mb-6">Pick your challenge, then keep playing that way.</p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full mb-9">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full mb-7">
               <button
                 id="tally-mode-dots"
                 onClick={() => { playTick(); triggerHaptic(); setMode("dots"); }}
@@ -367,6 +374,15 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accen
                 <span className="w-6 h-6 inline-block shrink-0"><PieceShape shape={roundData.targetShape} color="var(--color-ink)" /></span>
               )}
             </span>
+            {prog.timerSeconds !== null && (
+              <RunTimer
+                id="tally-run-timer"
+                seconds={prog.timerSeconds}
+                running={stage === "answer"}
+                runKey={roundNumber}
+                onExpire={handleTimeout}
+              />
+            )}
             <div className="grid grid-cols-4 gap-3 w-full max-w-sm">
               {roundData.options.map((opt, i) => (
                 <motion.button
@@ -386,18 +402,21 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accen
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center gap-7">
+          <div className="flex flex-col items-center gap-4">
             <VerdictHead
               id="tally-reveal-verdict"
               ok={isUserCorrect}
               headline={
                 isUserCorrect
                   ? "Exact count."
-                  : `Off by ${Math.abs((roundData.userSelection ?? 0) - roundData.trueCount)}.`
+                  : timedOut
+                    ? "Time ran out."
+                    : `Off by ${Math.abs((roundData.userSelection ?? 0) - roundData.trueCount)}.`
               }
               score={String(roundData.trueCount)}
               scoreCaption={roundData.mode === "shapes" ? `True ${targetLabel}` : "True count"}
             />
+            <OutcomeNote outcome={lastOutcome} />
 
             <Wobble active={!isUserCorrect}>{board("w-52 h-52", 2.1, false)}</Wobble>
 
@@ -415,15 +434,13 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, streak, accen
               }
             />
 
-            <div className="flex flex-col items-center gap-4">
-              <Btn id="tally-next-btn" variant="secondary" onClick={handleNextRound}>
-                {isUserCorrect ? "Next run" : "Try again"}
-              </Btn>
-              <NextIn seconds={countdown} />
-            </div>
+            <Btn id="tally-next-btn" variant="secondary" onClick={handleNextRound}>
+              {isUserCorrect ? "Next run" : "Try again"}
+            </Btn>
           </div>
         )}
       </div>
+      {prog.overlays}
     </div>
   );
 };

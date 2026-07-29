@@ -3,12 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { SwatchRoundData } from "../../types";
 import { setupSwatchRound } from "../../utils/gameLogic";
 import { hslToCss, HSL } from "../../utils/color";
-import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, Wobble } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, Btn, Wobble } from "../ui/Kit";
+import { useProgression, LivesBar, RunTimer, OutcomeNote } from "../ui/Progress";
+import { RunOutcome } from "../../utils/progression";
 import { SwatchGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -19,23 +21,20 @@ interface GameProps {
   streak?: number;
 }
 
-export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, accentColor }) => {
+export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }) => {
+  const prog = useProgression("swatch");
   const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
-  const [roundData, setRoundData] = useState<SwatchRoundData>(() => setupSwatchRound());
+  const [roundData, setRoundData] = useState<SwatchRoundData>(() => setupSwatchRound(prog.ramp));
   const [round, setRound] = useState(1);
-  const [countdown, setCountdown] = useState<number>(4);
-  const autoAdvanceTimer = useRef<number | null>(null);
+  const [lastOutcome, setLastOutcome] = useState<RunOutcome | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
 
-  /* Next run goes straight to the countdown — no detour to instructions */
+  /* Next run waits for the CTA — no auto-advance */
   const handleNextRound = () => {
-    if (autoAdvanceTimer.current) {
-      clearTimeout(autoAdvanceTimer.current);
-      autoAdvanceTimer.current = null;
-    }
-    setRoundData(setupSwatchRound());
+    setTimedOut(false);
+    setRoundData(setupSwatchRound(prog.ramp));
     setRound((r) => r + 1);
     setStage("countdown");
-    setCountdown(4);
   };
 
   useEffect(() => {
@@ -54,18 +53,7 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, acce
     correct.l === roundData.userSelection.l;
 
   useEffect(() => {
-    if (stage === "reveal") {
-      playRevealInterval();
-
-      const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
-      const timer = setTimeout(handleNextRound, 4000);
-      autoAdvanceTimer.current = timer as unknown as number;
-
-      return () => {
-        clearInterval(interval);
-        clearTimeout(timer);
-      };
-    }
+    if (stage === "reveal") playRevealInterval();
   }, [stage]);
 
   const handleSelectOption = (option: { color: HSL; isCorrect: boolean }) => {
@@ -73,19 +61,33 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, acce
     playTick();
     triggerHaptic();
     onResult?.(option.isCorrect); // record the result once, at answer time
+    setLastOutcome(prog.report(option.isCorrect, option.isCorrect ? 100 : 0));
     setRoundData((prev) => ({ ...prev, userSelection: option.color }));
     setStage("reveal");
   };
 
-  const status =
-    stage === "stimulus" ? "Memorize it" :
-    stage === "answer" ? "Which one was it?" :
-    stage === "reveal" ? `Next in ${countdown}s` :
-    `Round ${String(round).padStart(2, "0")}`;
+  /* Clock ran out with no pick — counts as a miss */
+  const handleTimeout = () => {
+    if (stage !== "answer") return;
+    triggerHaptic();
+    onResult?.(false);
+    setTimedOut(true);
+    setLastOutcome(prog.report(false, 0));
+    setStage("reveal");
+  };
 
   return (
-    <div id="swatch-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Color Match" status={status} onBack={onBack} streak={streak} />
+    <div id="swatch-game-container" className="w-full flex flex-col flex-1 max-w-3xl mx-auto">
+      <GameHead
+        title="Color Match"
+        onBack={onBack}
+        streak={prog.streak}
+        points={prog.points}
+        lives={<LivesBar lives={prog.lives} />}
+        onReset={prog.requestReset}
+        gameId="swatch"
+        accent={accentColor}
+      />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
@@ -93,8 +95,8 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, acce
             name="Color Match"
             steps={[
               "Memorize one color — you get two seconds.",
-              "It hides among five near-identical impostors.",
-              "Tap the exact color you saw.",
+              "It hides among near-identical impostors — every level adds one more.",
+              "Tap the exact color before the clock runs out. Clean-pass all 5 runs to level up.",
             ]}
             glyph={<span className="scale-150 inline-block"><SwatchGlyph /></span>}
             onComplete={() => setStage("stimulus")}
@@ -127,7 +129,16 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, acce
             <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-ink">
               Tap the exact match
             </span>
-            <div className="grid grid-cols-3 gap-3 w-full max-w-sm">
+            {prog.timerSeconds !== null && (
+              <RunTimer
+                id="swatch-run-timer"
+                seconds={prog.timerSeconds}
+                running={stage === "answer"}
+                runKey={round}
+                onExpire={handleTimeout}
+              />
+            )}
+            <div className="grid grid-cols-6 gap-3 w-full max-w-2xl">
               {roundData.options.map((opt, idx) => (
                 <motion.button
                   key={idx}
@@ -150,13 +161,14 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, acce
             <VerdictHead
               id="swatch-reveal-verdict"
               ok={isUserCorrect}
-              headline={isUserCorrect ? "Spot on." : "An impostor got you."}
+              headline={isUserCorrect ? "Spot on." : timedOut ? "Time ran out." : "An impostor got you."}
             />
+            <OutcomeNote outcome={lastOutcome} />
 
-            <Wobble active={!isUserCorrect} className="w-full max-w-sm flex justify-center">
+            <Wobble active={!isUserCorrect} className="w-full max-w-2xl flex justify-center">
               {/* Every color stays at full strength; tags sit BELOW the
                   swatches so they never blend into a similar color */}
-              <div className="grid grid-cols-3 gap-3 w-full">
+              <div className="grid grid-cols-6 gap-3 w-full">
                 {roundData.options.map((opt, idx) => {
                   const isSelected =
                     !!roundData.userSelection &&
@@ -203,13 +215,11 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, streak, acce
               }
             />
 
-            <div className="flex flex-col items-center gap-4">
-              <Btn id="swatch-next-btn" variant="secondary" onClick={handleNextRound}>Next color</Btn>
-              <NextIn seconds={countdown} />
-            </div>
+            <Btn id="swatch-next-btn" variant="secondary" onClick={handleNextRound}>Next color</Btn>
           </div>
         )}
       </div>
+      {prog.overlays}
     </div>
   );
 };

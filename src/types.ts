@@ -40,6 +40,12 @@ export interface MixRoundData {
   targetColor: HSL;
   userColor: HSL;
   score: number | null;
+  /* L4: the opacity channel joins the dials */
+  targetAlpha?: number;
+  userAlpha?: number;
+  /* L5/L6: per-circle hues; saturation/lightness lock to targetColor's */
+  targetHues?: number[];
+  userHues?: number[];
 }
 
 export interface EchoRoundData {

@@ -14,7 +14,9 @@ import {
   MAX_RADIUS,
   SQUIRCLE_PASSES_PER_PHASE,
 } from "../../utils/shapeLogic";
-import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, PassNote } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, Btn, PassNote } from "../ui/Kit";
+import { useProgression, LivesBar, RunTimer, OutcomeNote } from "../ui/Progress";
+import { RunOutcome } from "../../utils/progression";
 import { SquircleGlyph } from "../ui/ShapeGlyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -37,16 +39,16 @@ const radiiCss = (r: Radii) => `${r[0]}% ${r[1]}% ${r[2]}% ${r[3]}%`;
    shortens the next glimpse, and every 20 passes one more corner breaks
    away from the rest (with the timer reset to the full two seconds).
    Purely greyscale. */
-export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
-  const [level, setLevel] = useState(1);
+export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult }) => {
+  const prog = useProgression("round");
   const [passes, setPasses] = useState(0);
   const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundData, setRoundData] = useState<SquircleRoundData>(() => setupSquircleRound(0));
   const [round, setRound] = useState(1);
   /* Mobile alternative to ⌘/Ctrl-drag once corners start splitting */
   const [cornerMode, setCornerMode] = useState<"all" | "one">("all");
-  const [countdown, setCountdown] = useState<number>(5);
-  const autoAdvanceTimer = useRef<number | null>(null);
+  const [lastOutcome, setLastOutcome] = useState<RunOutcome | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
   const squareRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ corner: number; single: boolean } | null>(null);
   /* Which handle is being dragged, and whether that drag is shaping just
@@ -55,7 +57,7 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult, streak }) 
   const [activeCorner, setActiveCorner] = useState<number | null>(null);
   const [dragIsSingle, setDragIsSingle] = useState(false);
 
-  const params = getSquircleParams(level);
+  const params = getSquircleParams(prog.ramp);
   const phase = getSquirclePhase(passes);
   /* Once corners split, the glimpse timer resets to the full two seconds —
      the difficulty is carried by the corners, not the clock */
@@ -64,15 +66,10 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult, streak }) 
   /* Pass-gated: 80+ climbs one rung (capped at L6) and counts toward the
      corner phases; a miss replays the rung. */
   const handleNextRound = () => {
-    if (autoAdvanceTimer.current) {
-      clearTimeout(autoAdvanceTimer.current);
-      autoAdvanceTimer.current = null;
-    }
-    if ((roundData.score ?? 0) >= 80) setLevel((l) => Math.min(6, l + 1));
+    setTimedOut(false);
     setRoundData(setupSquircleRound(passes));
     setRound((r) => r + 1);
     setStage("countdown");
-    setCountdown(5);
   };
 
   useEffect(() => {
@@ -83,18 +80,7 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult, streak }) 
   }, [stage]);
 
   useEffect(() => {
-    if (stage === "reveal") {
-      playRevealInterval();
-
-      const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
-      const timer = setTimeout(handleNextRound, 5000);
-      autoAdvanceTimer.current = timer as unknown as number;
-
-      return () => {
-        clearInterval(interval);
-        clearTimeout(timer);
-      };
-    }
+    if (stage === "reveal") playRevealInterval();
   }, [stage]);
 
   /* ---- corner-handle drag ---- */
@@ -144,10 +130,22 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult, streak }) 
 
   const handleDone = () => {
     if (stage !== "answer") return;
-    const score = scoreSquircle(roundData.guessRadii, roundData.trueRadii, level);
+    const score = scoreSquircle(roundData.guessRadii, roundData.trueRadii, prog.ramp);
     onResult?.(score >= 80); // 80 is the pass mark; passes feed the streak
+    setLastOutcome(prog.report(score >= 80, score));
     if (score >= 80) setPasses((p) => p + 1);
     setRoundData((prev) => ({ ...prev, score }));
+    setStage("reveal");
+  };
+
+  /* Clock ran out mid-rebuild — counts as a zero-score miss */
+  const handleTimeout = () => {
+    if (stage !== "answer") return;
+    triggerHaptic();
+    onResult?.(false);
+    setTimedOut(true);
+    setLastOutcome(prog.report(false, 0));
+    setRoundData((prev) => ({ ...prev, score: 0 }));
     setStage("reveal");
   };
 
@@ -162,12 +160,6 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult, streak }) 
         : score >= 60
           ? "Watch where the straight edge ends, not where the curve begins."
           : "Corners lie to everyone at first. The level stays put until you pass.";
-
-  const status =
-    stage === "stimulus" ? "Memorize it" :
-    stage === "answer" ? "Rebuild the corners" :
-    stage === "reveal" ? `Next in ${countdown}s` :
-    `Round ${String(round).padStart(2, "0")}`;
 
   /* One squircle: a filled square whose border-radius IS the quantity
      being judged */
@@ -206,8 +198,17 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult, streak }) 
   ];
 
   return (
-    <div id="squircle-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Round the Corner" status={status} onBack={onBack} streak={streak} mono level={level} />
+    <div id="squircle-game-container" className="w-full flex flex-col flex-1 max-w-3xl mx-auto">
+      <GameHead
+        title="Round the Corner"
+        onBack={onBack}
+        streak={prog.streak}
+        points={prog.points}
+        mono
+        lives={<LivesBar lives={prog.lives} />}
+        onReset={prog.requestReset}
+        gameId="round"
+      />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
@@ -238,9 +239,15 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult, streak }) 
         )}
 
         {stage === "answer" && (
-          <div className="flex flex-col items-center w-full gap-7">
+          <div className="flex flex-col items-center w-full gap-6">
+            <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-ink">
+              Rebuild the corners
+            </span>
+            {/* Workbench on the left, clock + readout + modifier hint stacked
+                beside it — columns instead of rows, so the CTA stays in the fold */}
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-10 w-full">
             {/* The workbench: the square plus its four corner handles */}
-            <div ref={squareRef} className="relative w-56 h-56 sm:w-64 sm:h-64 touch-none select-none">
+            <div ref={squareRef} className="relative w-56 h-56 sm:w-64 sm:h-64 shrink-0 touch-none select-none">
               <div
                 id="squircle-interactive-box"
                 className="w-full h-full bg-ink"
@@ -260,7 +267,16 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult, streak }) 
               ))}
             </div>
 
-            <div className="flex flex-col items-center gap-3">
+            <div className="flex flex-col items-center sm:items-start gap-3 sm:max-w-[16rem]">
+              {prog.timerSeconds !== null && (
+                <RunTimer
+                  id="squircle-run-timer"
+                  seconds={prog.timerSeconds}
+                  running={stage === "answer"}
+                  runKey={round}
+                  onExpire={handleTimeout}
+                />
+              )}
               <span className="font-mono font-extrabold text-[11px] tracking-[0.12em] uppercase text-mut tabular-nums">
                 Corners · {roundData.guessRadii.map((r) => Math.round(r)).join(" · ")}
               </span>
@@ -292,43 +308,46 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult, streak }) 
                 </>
               )}
             </div>
+            </div>
 
             <Btn id="squircle-done-btn" variant="secondary" onClick={handleDone}>Lock it in</Btn>
           </div>
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center gap-7">
+          <div className="flex flex-col items-center gap-5">
             <VerdictHead
               id="squircle-reveal-verdict"
               ok={score >= 80}
-              headline={verdictHead}
+              headline={timedOut ? "Time ran out." : verdictHead}
               score={String(score)}
               scoreCaption="Match / 100"
               mono
             />
+            <OutcomeNote outcome={lastOutcome} />
 
-            {/* Truth and guess side by side — truth in ink, yours mid-grey */}
-            <div className="flex items-end gap-6">
-              <div className="flex flex-col items-center gap-2.5">
-                {squircle(roundData.trueRadii, "w-32 h-32 sm:w-36 sm:h-36", "squircle-reveal-target")}
-                <span className="font-mono font-extrabold text-[11px] tracking-[0.14em] uppercase text-mut">Correct</span>
+            {/* Truth and guess side by side — truth in ink, yours mid-grey —
+                with the explanation alongside rather than stacked beneath */}
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-5 sm:gap-9 w-full">
+              <div className="flex items-end gap-6 shrink-0">
+                <div className="flex flex-col items-center gap-2.5">
+                  {squircle(roundData.trueRadii, "w-28 h-28 sm:w-32 sm:h-32", "squircle-reveal-target")}
+                  <span className="font-mono font-extrabold text-[11px] tracking-[0.14em] uppercase text-mut">Correct</span>
+                </div>
+                <div className="flex flex-col items-center gap-2.5">
+                  {squircle(roundData.guessRadii, "w-28 h-28 sm:w-32 sm:h-32", "squircle-reveal-guess", true)}
+                  <span className="font-mono font-extrabold text-[11px] tracking-[0.14em] uppercase text-mut">Your</span>
+                </div>
               </div>
-              <div className="flex flex-col items-center gap-2.5">
-                {squircle(roundData.guessRadii, "w-32 h-32 sm:w-36 sm:h-36", "squircle-reveal-guess", true)}
-                <span className="font-mono font-extrabold text-[11px] tracking-[0.14em] uppercase text-mut">Your</span>
-              </div>
+
+              <VerdictBody id="squircle-reveal-score" detail={verdictDetail} />
             </div>
 
-            <VerdictBody id="squircle-reveal-score" detail={verdictDetail} />
-
-            <div className="flex flex-col items-center gap-4">
-              <Btn id="squircle-next-btn" variant="secondary" onClick={handleNextRound}>Next curve</Btn>
-              <NextIn seconds={countdown} />
-            </div>
+            <Btn id="squircle-next-btn" variant="secondary" onClick={handleNextRound}>Next curve</Btn>
           </div>
         )}
       </div>
+      {prog.overlays}
     </div>
   );
 };

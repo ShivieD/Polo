@@ -34,6 +34,15 @@ const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 const clampLevel = (level: number, max = 6): ShapeLevel =>
   Math.max(1, Math.min(max, Math.round(level))) as ShapeLevel;
 
+/* Run-ramp plumbing: getters take a FLOAT level (level + cycle fraction).
+   Continuous knobs lerp between adjacent table rows; discrete knobs jump
+   to the next row on the cycle's back half (frac >= 0.6). */
+const rampParts = (ramp: number, max = 6) => {
+  const t = Math.max(1, Math.min(max, ramp));
+  return { lo: Math.floor(t) - 1, hi: Math.min(max, Math.ceil(t)) - 1, frac: t - Math.floor(t) };
+};
+const lerp = (a: number, b: number, f: number) => a + (b - a) * f;
+
 /* ------------------------------------------------------------------ */
 /* Shape Match (Form) — distractor similarity tightens per level        */
 /* ------------------------------------------------------------------ */
@@ -57,38 +66,63 @@ export const FORM_MAX_LEVEL = 8;
 /* The L1→L8 ramp trades one knob at a time, in smaller steps than v1 so the
    difficulty doesn't cliff: families → neighbors → mixed → coarse aspect →
    fine aspect → paint → ±12% size → ±7% size. */
-export function setupFormRound(levelIn: number): FormRoundData {
-  const level = clampLevel(levelIn, FORM_MAX_LEVEL);
+export function setupFormRound(rampIn: number): FormRoundData {
+  /* Run ramp: recipes bump on the cycle's back half; inside a recipe the
+     numeric knobs tighten with cycle progress so every run is a shade
+     harder than the last. */
+  const t = Math.max(1, Math.min(FORM_MAX_LEVEL, rampIn));
+  const fl = Math.floor(t);
+  const rawFrac = t - fl;
+  const level = rawFrac >= 0.6 ? Math.min(FORM_MAX_LEVEL, fl + 1) : fl;
+  const f = rawFrac >= 0.6 ? 0 : rawFrac / 0.6; // progress within this recipe
+  const mixT = (a: number, b: number) => a + (b - a) * f;
   const kind = pick(ALL_KINDS);
   let specs: ShapeSpec[];
   let targetIdx: number;
 
   if (level === 1) {
-    /* Six clearly distinct shape families */
-    const kinds = shuffle(ALL_KINDS).slice(0, 6);
+    /* Two near-neighbors are in the lineup from the very first run — an
+       all-distinct-families board was a freebie — and the rest crowd in
+       run by run until L1 ends on a full neighbor set. */
+    const neighborCount = 2 + Math.round(f * 3);
+    const neighbors = SIMILAR[kind].slice(0, neighborCount);
+    const fillers = shuffle(ALL_KINDS.filter((k) => k !== kind && !neighbors.includes(k))).slice(
+      0,
+      5 - neighborCount
+    );
+    const kinds = [kind, ...neighbors, ...fillers];
     specs = kinds.map((k) => ({ kind: k }));
-    targetIdx = randInt(0, 5);
+    targetIdx = 0;
   } else if (level === 2) {
-    /* Target plus five near-neighbors from adjacent families */
-    specs = [{ kind }, ...SIMILAR[kind].slice(0, 5).map((k) => ({ kind: k }))];
+    /* Four near-neighbors plus two stretched twins of the target itself —
+       same silhouette, wrong proportion — which tighten run by run */
+    specs = [
+      { kind },
+      ...SIMILAR[kind].slice(0, 4).map((k) => ({ kind: k })),
+      { kind, aspect: mixT(0.62, 0.78) },
+    ];
     targetIdx = 0;
   } else if (level === 3) {
-    /* Half-step: three near-neighbors plus two stretched twins of the target */
+    /* Near-neighbors plus stretched twins that straighten out run by run */
     specs = [
       { kind },
       ...SIMILAR[kind].slice(0, 3).map((k) => ({ kind: k })),
-      { kind, aspect: 0.6 },
-      { kind, aspect: 1.55 },
+      { kind, aspect: mixT(0.6, 0.74) },
+      { kind, aspect: mixT(1.55, 1.32) },
     ];
     targetIdx = 0;
   } else if (level === 4) {
-    /* Same shape, clearly different aspect ratios */
-    const aspects = shuffle([1, 0.5, 0.7, 1.4, 1.9, 0.33]);
+    /* Same shape, aspect ratios drifting from blatant toward subtle */
+    const a4 = [1, 0.5, 0.7, 1.4, 1.9, 0.33];
+    const a5 = [1, 0.72, 0.85, 1.18, 1.4, 0.6];
+    const aspects = shuffle(a4.map((a, i) => mixT(a, a5[i])));
     specs = aspects.map((aspect) => ({ kind, aspect }));
     targetIdx = aspects.indexOf(1);
   } else if (level === 5) {
-    /* Same shape, subtler aspect ratios */
-    const aspects = shuffle([1, 0.72, 0.85, 1.18, 1.4, 0.6]);
+    /* Same shape, subtler aspect ratios, converging further per run */
+    const a5 = [1, 0.72, 0.85, 1.18, 1.4, 0.6];
+    const a5b = [1, 0.8, 0.9, 1.12, 1.26, 0.68];
+    const aspects = shuffle(a5.map((a, i) => mixT(a, a5b[i])));
     specs = aspects.map((aspect) => ({ kind, aspect }));
     targetIdx = aspects.indexOf(1);
   } else if (level === 6) {
@@ -104,8 +138,8 @@ export function setupFormRound(levelIn: number): FormRoundData {
     specs = paints.map((p) => ({ kind, ...p }));
     targetIdx = randInt(0, 5);
   } else {
-    /* L7 ~12% / L8 ~7% proportional size variations of the same shape */
-    const step = level === 7 ? 0.12 : 0.07;
+    /* L7→L8: proportional size steps shrink continuously 12% → 7% */
+    const step = level === 7 ? mixT(0.12, 0.095) : mixT(0.095, 0.07);
     const base = 0.72;
     const factors = shuffle([0, 1, 2, -1, -2, 3].map((k) => Math.pow(1 + step, k)));
     specs = factors.map((f) => ({ kind, scale: Math.min(1, base * f) }));
@@ -177,7 +211,13 @@ const TILT_TABLE = [
   { exposure: 600, tolerance: 1.5 },
 ];
 
-export const getTiltParams = (level: number) => TILT_TABLE[clampLevel(level) - 1];
+export const getTiltParams = (ramp: number) => {
+  const { lo, hi, frac } = rampParts(ramp);
+  return {
+    exposure: Math.round(lerp(TILT_TABLE[lo].exposure, TILT_TABLE[hi].exposure, frac)),
+    tolerance: lerp(TILT_TABLE[lo].tolerance, TILT_TABLE[hi].tolerance, frac),
+  };
+};
 
 export function setupTiltRound(): TiltRoundData {
   const trueAngle = rand(0, 180);
@@ -211,7 +251,10 @@ const CHAIN_TABLE: ChainParams[] = [
   { len: 7, poolSize: 4, allowRepeat: true, sameFamily: true },
 ];
 
-export const getChainParams = (level: number): ChainParams => CHAIN_TABLE[clampLevel(level) - 1];
+export const getChainParams = (ramp: number): ChainParams => {
+  const { lo, hi, frac } = rampParts(ramp);
+  return CHAIN_TABLE[frac >= 0.6 ? hi : lo];
+};
 
 export const CHAIN_STEP_MS = 600;
 
@@ -256,7 +299,13 @@ const SQUIRCLE_TABLE = [
   { exposure: 600, tolerance: 0.03 },
 ];
 
-export const getSquircleParams = (level: number) => SQUIRCLE_TABLE[clampLevel(level) - 1];
+export const getSquircleParams = (ramp: number) => {
+  const { lo, hi, frac } = rampParts(ramp);
+  return {
+    exposure: Math.round(lerp(SQUIRCLE_TABLE[lo].exposure, SQUIRCLE_TABLE[hi].exposure, frac)),
+    tolerance: lerp(SQUIRCLE_TABLE[lo].tolerance, SQUIRCLE_TABLE[hi].tolerance, frac),
+  };
+};
 
 /* Every 20 passed rounds one more corner breaks away from the rest —
    and the exposure timer resets to the full two seconds. */
@@ -314,14 +363,18 @@ export function scoreSquircle(
    - coarse: a big attribute change, 25-35 (medium)
    - fine:   a subtle change from the per-level table (hard)
    Higher levels skew harder but easy rounds never fully disappear. */
-const SHIFT_FINE_MAGNITUDE = [18, 14, 11, 8, 6, 4];
+const SHIFT_FINE_MAGNITUDE = [14, 11, 9, 7, 5, 3.5];
+/* L1 used to be half free swaps and no subtle rounds at all, which made the
+   opening levels a formality. Swaps are cut back and a real share of fine
+   rounds is present from L1 — the ladder still climbs, it just starts
+   somewhere worth playing. */
 const SHIFT_TIER_WEIGHTS: [number, number, number][] = [
-  [0.5, 0.5, 0.0],
-  [0.35, 0.45, 0.2],
-  [0.25, 0.4, 0.35],
-  [0.2, 0.35, 0.45],
-  [0.15, 0.3, 0.55],
-  [0.1, 0.25, 0.65],
+  [0.18, 0.5, 0.32],
+  [0.14, 0.45, 0.41],
+  [0.11, 0.39, 0.5],
+  [0.09, 0.33, 0.58],
+  [0.07, 0.28, 0.65],
+  [0.05, 0.23, 0.72],
 ];
 
 /* Kinds where every change type stays visible (no circles — rotation
@@ -333,7 +386,7 @@ const SHIFT_KINDS: ShapeKind[] = ["square", "triangle", "arrow", "hexagon", "plu
    drifting. Constant across levels so the challenge TYPE stays
    unpredictable from round one; the attribute rounds carry the
    level-driven subtlety ramp. */
-const SHIFT_LINEUP_CHANCE = 0.4;
+const SHIFT_LINEUP_CHANCE = 0.22;
 
 /* A lineup round: every cell its own shape, the changed one comes back as
    a fifth kind not present in the original four. */
@@ -358,11 +411,13 @@ function setupShiftLineupRound(): ShapeShiftRoundData {
   };
 }
 
-export function setupShapeShiftRound(levelIn: number): ShapeShiftRoundData {
+export function setupShapeShiftRound(rampIn: number): ShapeShiftRoundData {
   if (Math.random() < SHIFT_LINEUP_CHANCE) return setupShiftLineupRound();
 
-  const level = clampLevel(levelIn);
-  const [wSwap, wCoarse] = SHIFT_TIER_WEIGHTS[level - 1];
+  const { lo, hi, frac } = rampParts(rampIn);
+  const level = clampLevel(rampIn);
+  const wSwap = lerp(SHIFT_TIER_WEIGHTS[lo][0], SHIFT_TIER_WEIGHTS[hi][0], frac);
+  const wCoarse = lerp(SHIFT_TIER_WEIGHTS[lo][1], SHIFT_TIER_WEIGHTS[hi][1], frac);
   const roll = Math.random();
   const tier = roll < wSwap ? "swap" : roll < wSwap + wCoarse ? "coarse" : "fine";
 
@@ -382,7 +437,10 @@ export function setupShapeShiftRound(levelIn: number): ShapeShiftRoundData {
     changedSpec.kind = pick(ALL_KINDS.filter((k) => k !== kind));
     if (changedSpec.kind !== "square") changedSpec.radius = undefined;
   } else {
-    const mag = tier === "coarse" ? rand(25, 35) : SHIFT_FINE_MAGNITUDE[level - 1];
+    const mag =
+      tier === "coarse"
+        ? rand(19, 28)
+        : lerp(SHIFT_FINE_MAGNITUDE[lo], SHIFT_FINE_MAGNITUDE[hi], frac);
     const kinds: ShapeChangeKind[] = kind === "square" ? ["rotation", "size", "radius"] : ["rotation", "size"];
     changeKind = pick(kinds);
     const dir = Math.random() > 0.5 ? 1 : -1;
@@ -419,7 +477,13 @@ const SHAPE_TALLY_TABLE = [
   { popSpeed: 90, offsets: [1] },
 ];
 
-export const getShapeTallyParams = (level: number) => SHAPE_TALLY_TABLE[clampLevel(level) - 1];
+export const getShapeTallyParams = (ramp: number) => {
+  const { lo, hi, frac } = rampParts(ramp);
+  return {
+    popSpeed: Math.round(lerp(SHAPE_TALLY_TABLE[lo].popSpeed, SHAPE_TALLY_TABLE[hi].popSpeed, frac)),
+    offsets: SHAPE_TALLY_TABLE[frac >= 0.6 ? hi : lo].offsets,
+  };
+};
 
 /* Scatter non-overlapping points inside 15-85 percentage bounds
    (same physics as Color-mode Tally) */
