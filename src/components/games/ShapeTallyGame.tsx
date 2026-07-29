@@ -3,11 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { ShapeTallyRoundData } from "../../types";
 import { setupShapeTallyRound, getShapeTallyParams } from "../../utils/shapeLogic";
-import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, Wobble } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, Btn, Wobble } from "../ui/Kit";
+import { useProgression, LivesBar, RunTimer, OutcomeNote } from "../ui/Progress";
+import { RunOutcome } from "../../utils/progression";
 import { ShapeTallyGlyph } from "../ui/ShapeGlyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -22,32 +24,25 @@ interface GameProps {
    identical ink pieces flashes up whole and vanishes; count them with no
    color to chunk by. The level schedule shortens exposure and squeezes the
    answer options together. Purely greyscale. */
-export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
-  const [level, setLevel] = useState(1);
+export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult }) => {
+  const prog = useProgression("shapetally");
   const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
-  const [roundData, setRoundData] = useState<ShapeTallyRoundData>(() => setupShapeTallyRound(1));
+  const [roundData, setRoundData] = useState<ShapeTallyRoundData>(() => setupShapeTallyRound(prog.ramp));
   const [round, setRound] = useState(1);
   const [visibleCount, setVisibleCount] = useState<number>(0);
-  const [countdown, setCountdown] = useState<number>(5);
-  const autoAdvanceTimer = useRef<number | null>(null);
+  const [lastOutcome, setLastOutcome] = useState<RunOutcome | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
 
-  const params = getShapeTallyParams(level);
+  const params = getShapeTallyParams(prog.ramp);
   const isUserCorrect = roundData.userSelection === roundData.trueCount;
 
-  /* Pass-gated: an exact count climbs one rung (capped at L6); a miss
-     replays the same rung. Next run goes straight to the countdown. */
+  /* Next run waits for the CTA — no auto-advance */
   const handleNextRound = () => {
-    if (autoAdvanceTimer.current) {
-      clearTimeout(autoAdvanceTimer.current);
-      autoAdvanceTimer.current = null;
-    }
-    const nextLevel = isUserCorrect ? Math.min(6, level + 1) : level;
-    setLevel(nextLevel);
-    setRoundData(setupShapeTallyRound(nextLevel));
+    setTimedOut(false);
+    setRoundData(setupShapeTallyRound(prog.ramp));
     setRound((r) => r + 1);
     setVisibleCount(0);
     setStage("countdown");
-    setCountdown(5);
   };
 
   /* Pieces drop one at a time, a tick per landing — the same cadence as
@@ -73,18 +68,7 @@ export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }
   }, [stage, roundData.points.length, params.popSpeed]);
 
   useEffect(() => {
-    if (stage === "reveal") {
-      playRevealInterval();
-
-      const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
-      const timer = setTimeout(handleNextRound, 5000);
-      autoAdvanceTimer.current = timer as unknown as number;
-
-      return () => {
-        clearInterval(interval);
-        clearTimeout(timer);
-      };
-    }
+    if (stage === "reveal") playRevealInterval();
   }, [stage]);
 
   const handleSelectOption = (num: number) => {
@@ -92,15 +76,20 @@ export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }
     playTick();
     triggerHaptic();
     onResult?.(num === roundData.trueCount); // record the result once, at answer time
+    setLastOutcome(prog.report(num === roundData.trueCount, num === roundData.trueCount ? 100 : 0));
     setRoundData((prev) => ({ ...prev, userSelection: num }));
     setStage("reveal");
   };
 
-  const status =
-    stage === "stimulus" ? "Count them" :
-    stage === "answer" ? "How many?" :
-    stage === "reveal" ? `Next in ${countdown}s` :
-    `Round ${String(round).padStart(2, "0")}`;
+  /* Clock ran out with no pick — counts as a miss */
+  const handleTimeout = () => {
+    if (stage !== "answer") return;
+    triggerHaptic();
+    onResult?.(false);
+    setTimedOut(true);
+    setLastOutcome(prog.report(false, 0));
+    setStage("reveal");
+  };
 
   const board = (size: string, dotScale: number, animated: boolean) => (
     <div
@@ -155,8 +144,17 @@ export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }
   );
 
   return (
-    <div id="shapetally-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Count the Shapes" status={status} onBack={onBack} streak={streak} mono level={level} />
+    <div id="shapetally-game-container" className="w-full flex flex-col flex-1 max-w-3xl mx-auto">
+      <GameHead
+        title="Count the Shapes"
+        onBack={onBack}
+        streak={prog.streak}
+        points={prog.points}
+        mono
+        lives={<LivesBar lives={prog.lives} />}
+        onReset={prog.requestReset}
+        gameId="shapetally"
+      />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
@@ -187,6 +185,15 @@ export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }
             <span className="font-display font-extrabold text-xl sm:text-2xl tracking-tight text-ink text-center">
               How many pieces landed?
             </span>
+            {prog.timerSeconds !== null && (
+              <RunTimer
+                id="shapetally-run-timer"
+                seconds={prog.timerSeconds}
+                running={stage === "answer"}
+                runKey={round}
+                onExpire={handleTimeout}
+              />
+            )}
             <div className="grid grid-cols-4 gap-3 w-full max-w-sm">
               {roundData.options.map((opt, i) => (
                 <motion.button
@@ -206,39 +213,42 @@ export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult, streak }
         )}
 
         {stage === "reveal" && (
-          <div className="flex flex-col items-center gap-7">
+          <div className="flex flex-col items-center gap-5">
             <VerdictHead
               id="shapetally-reveal-verdict"
               ok={isUserCorrect}
               headline={
                 isUserCorrect
                   ? "Exact count."
-                  : `Off by ${Math.abs((roundData.userSelection ?? 0) - roundData.trueCount)}.`
+                  : timedOut
+                    ? "Time ran out."
+                    : `Off by ${Math.abs((roundData.userSelection ?? 0) - roundData.trueCount)}.`
               }
               score={String(roundData.trueCount)}
               scoreCaption="True count"
               mono
             />
+            <OutcomeNote outcome={lastOutcome} />
 
-            <Wobble active={!isUserCorrect}>{board("w-52 h-52", 2.1, false)}</Wobble>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-5 sm:gap-9 w-full">
+              <Wobble active={!isUserCorrect} className="shrink-0">{board("w-48 h-48", 2.0, false)}</Wobble>
 
-            <VerdictBody
+              <VerdictBody
               detail={
                 isUserCorrect
                   ? `${roundData.trueCount} pieces with no color to chunk by — sharp counting. The drops come faster next round.`
                   : `There were ${roundData.trueCount}. The tempo stays put until you nail it — group the pieces in threes as they land.`
-              }
-            />
-
-            <div className="flex flex-col items-center gap-4">
-              <Btn id="shapetally-next-btn" variant="secondary" onClick={handleNextRound}>
-                {isUserCorrect ? "Next scatter" : "Try again"}
-              </Btn>
-              <NextIn seconds={countdown} />
+                }
+              />
             </div>
+
+            <Btn id="shapetally-next-btn" variant="secondary" onClick={handleNextRound}>
+              {isUserCorrect ? "Next scatter" : "Try again"}
+            </Btn>
           </div>
         )}
       </div>
+      {prog.overlays}
     </div>
   );
 };

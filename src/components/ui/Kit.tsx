@@ -4,8 +4,11 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
-import { motion } from "motion/react";
+import { motion, AnimatePresence } from "motion/react";
 import { playTick, triggerHaptic } from "../../utils/audio";
+import { GameId } from "../../types";
+import { BoardOverlay } from "./BoardPanel";
+import { getPlayer, setPlayerName } from "../../utils/leaderboard";
 
 /* ------------------------------------------------------------------ */
 /* Buttons — pill geometry with physical press depth                   */
@@ -76,22 +79,147 @@ export const BackBtn: React.FC<{ onClick: () => void; id?: string }> = ({ onClic
 /* Game screen chrome                                                  */
 /* ------------------------------------------------------------------ */
 
+export const TrophyIcon: React.FC<{ size?: number }> = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M5 3h14v2h3v4c0 2.4-1.8 4.4-4.1 4.9A7 7 0 0 1 13 17.9V20h4v2H7v-2h4v-2.1a7 7 0 0 1-4.9-3.9C3.8 13.4 2 11.4 2 9V5h3V3Zm0 4H4v2c0 1.2.7 2.2 1.7 2.7A7 7 0 0 1 5 9V7Zm15 2V7h-1v2c0 .9-.2 1.8-.7 2.7 1-.5 1.7-1.5 1.7-2.7Z" />
+  </svg>
+);
+
+/* ------------------------------------------------------------------ */
+/* Name prompt — shown on first back/reset when player has no name      */
+/* ------------------------------------------------------------------ */
+
+const NamePrompt: React.FC<{
+  onDone: () => void;
+  onSkip: () => void;
+}> = ({ onDone, onSkip }) => {
+  const [value, setValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const handleSave = () => {
+    const trimmed = value.trim();
+    if (trimmed) setPlayerName(trimmed);
+    onDone();
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[60] flex items-center justify-center p-6"
+      style={{ background: "color-mix(in srgb, var(--color-ink-fixed) 55%, transparent)" }}
+    >
+      <motion.div
+        initial={{ scale: 0.85, y: 18 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 380, damping: 24 }}
+        className="bg-paper border-2 border-ink rounded-3xl px-7 py-8 max-w-sm w-full flex flex-col items-center text-center gap-5"
+      >
+        <div>
+          <div className="font-display font-extrabold text-xl text-ink mb-1.5">What should we call you?</div>
+          <p className="text-[14px] text-mut leading-relaxed">
+            Pick a name for the leaderboard. You can change it later.
+          </p>
+        </div>
+        <input
+          ref={inputRef}
+          type="text"
+          maxLength={24}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && value.trim()) handleSave(); }}
+          placeholder="Your name"
+          className="w-full bg-paper border-2 border-ink rounded-xl px-4 py-2.5 font-mono font-bold text-[15px] text-ink placeholder:text-mut/50 outline-none focus:ring-2 focus:ring-ink/20"
+        />
+        <div className="flex flex-wrap gap-3 justify-center">
+          <button
+            onClick={onSkip}
+            className="font-mono font-extrabold text-[10px] tracking-[0.12em] uppercase text-mut underline underline-offset-4 decoration-1 hover:text-ink cursor-pointer py-2 px-3"
+          >
+            Skip
+          </button>
+          <Btn variant="secondary" onClick={handleSave} disabled={!value.trim()}>
+            Save
+          </Btn>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+};
+
 export const GameHead: React.FC<{
   title: string;
-  status: string;
   onBack: () => void;
   streak?: number;
+  points?: number;
   id?: string;
-  /* Shapes mode: greyscale chrome — the streak chip trades yellow for ink */
   mono?: boolean;
-  /* Shapes mode: the in-session level marker, top-right. Soft opacity fade
-     when it advances — no celebration. */
-  level?: number;
-}> = ({ title, status, onBack, streak, id, mono = false, level }) => (
-  <div id={id} className="flex items-center gap-4 flex-wrap mb-8">
-    <BackBtn onClick={onBack} />
-    <h2 className="font-display font-extrabold text-xl sm:text-2xl tracking-tight text-ink">{title}</h2>
-    <span className="ml-auto flex items-center gap-3">
+  lives?: React.ReactNode;
+  onReset?: () => void;
+  gameId?: GameId;
+  accent?: string;
+}> = ({ title, onBack, streak, points, id, mono = false, lives, onReset, gameId, accent }) => {
+  const [boardOpen, setBoardOpen] = useState(false);
+  const [namePromptAction, setNamePromptAction] = useState<"back" | "reset" | null>(null);
+
+  const maybePromptName = (action: "back" | "reset") => {
+    const player = getPlayer();
+    if (!player.name) {
+      setNamePromptAction(action);
+      return;
+    }
+    if (action === "back") onBack();
+    else onReset?.();
+  };
+
+  const handleNameDone = () => {
+    const action = namePromptAction;
+    setNamePromptAction(null);
+    if (action === "back") onBack();
+    else onReset?.();
+  };
+
+  return (
+  <>
+  <AnimatePresence>
+    {namePromptAction && (
+      <NamePrompt
+        key="name-prompt"
+        onDone={handleNameDone}
+        onSkip={handleNameDone}
+      />
+    )}
+  </AnimatePresence>
+  <div id={id} className="flex items-center gap-x-3 gap-y-3 sm:gap-x-4 flex-wrap mb-8">
+    <BackBtn onClick={() => maybePromptName("back")} />
+    <h2 className="font-display font-extrabold text-lg sm:text-2xl tracking-tight text-ink whitespace-nowrap">
+      {title}
+    </h2>
+    <span className="ml-auto flex items-center gap-2.5 sm:gap-3 shrink-0">
+      {onReset && (
+        <button
+          id="game-reset-btn"
+          onClick={() => maybePromptName("reset")}
+          className="font-mono font-extrabold text-[10px] tracking-[0.12em] uppercase text-mut underline underline-offset-4 decoration-1 hover:text-ink cursor-pointer"
+        >
+          Reset
+        </button>
+      )}
+      {lives}
+      {typeof points === "number" && points > 0 && (
+        <span
+          id="game-points-display"
+          className="font-display font-extrabold text-[15px] sm:text-[17px] tracking-tight text-ink tabular-nums whitespace-nowrap"
+        >
+          {points}pts
+        </span>
+      )}
       {typeof streak === "number" && streak > 0 && (
         <span
           id="game-streak-chip"
@@ -102,24 +230,29 @@ export const GameHead: React.FC<{
           Streak {streak}
         </span>
       )}
-      <span className="font-mono font-extrabold text-[12px] tracking-[0.1em] text-mut uppercase tabular-nums">
-        {status}
-      </span>
-      {typeof level === "number" && (
-        <motion.span
-          key={level}
-          id="game-level-marker"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-          className="font-mono font-extrabold text-[12px] tracking-[0.1em] text-ink uppercase tabular-nums"
+      {gameId && (
+        <button
+          id="game-leaderboard-pill"
+          onClick={() => {
+            playTick();
+            triggerHaptic();
+            setBoardOpen(true);
+          }}
+          aria-label="This game\u2019s leaderboard"
+          className="rounded-full px-3 py-1.5 font-mono font-extrabold text-[10px] tracking-[0.12em] uppercase flex items-center gap-1.5 cursor-pointer border-2 border-ink text-ink bg-paper hover:bg-ink hover:text-paper transition-colors"
         >
-          L{level}
-        </motion.span>
+          <TrophyIcon size={11} />
+          <span className="hidden sm:inline">Leaderboard</span>
+        </button>
       )}
     </span>
+    {gameId && boardOpen && (
+      <BoardOverlay gameId={gameId} title={title} accent={accent} onClose={() => setBoardOpen(false)} />
+    )}
   </div>
-);
+  </>
+  );
+};
 
 /* White card with hairline border — the resting surface for game boards */
 export const Panel: React.FC<{ children: React.ReactNode; className?: string; id?: string }> = ({

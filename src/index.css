@@ -338,3 +338,11 @@ input[type="range"].polo-range::-moz-range-thumb {
 }
 .cell-pop:hover { transform: scale(1.06); }
 .cell-pop:active { transform: scale(0.95); }
+
+/* Color Mixer L4+: the classic transparency checkerboard. Reads the theme's
+   line/paper tokens so it stays quiet in both modes. */
+.polo-checker {
+  background:
+    repeating-conic-gradient(var(--color-line) 0% 25%, var(--color-paper) 0% 50%)
+    50% / 22px 22px;
+}

@@ -7,7 +7,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { TiltRoundData } from "../../types";
 import { setupTiltRound, getTiltParams, scoreTilt, tiltDiff } from "../../utils/shapeLogic";
-import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, PassNote } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, Btn, PassNote } from "../ui/Kit";
+import { useProgression, LivesBar, RunTimer, OutcomeNote } from "../ui/Progress";
+import { RunOutcome } from "../../utils/progression";
 import { TiltGlyph } from "../ui/ShapeGlyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -29,30 +31,24 @@ const lineEnds = (angle: number, reach = 44) => {
 /* Match the Tilt — the Shapes-mode parallel of Color Mixer. Memorize a
    line's rotation, then drag a line back to it. The level schedule shortens
    exposure and tightens the scoring tolerance. Purely greyscale. */
-export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
-  const [level, setLevel] = useState(1);
+export const TiltGame: React.FC<GameProps> = ({ onBack, onResult }) => {
+  const prog = useProgression("tilt");
   const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundData, setRoundData] = useState<TiltRoundData>(() => setupTiltRound());
   const [round, setRound] = useState(1);
-  const [countdown, setCountdown] = useState<number>(5);
-  const autoAdvanceTimer = useRef<number | null>(null);
+  const [lastOutcome, setLastOutcome] = useState<RunOutcome | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
   /* Angle of the pointer at the last move event — null when not dragging */
   const lastPointerAngle = useRef<number | null>(null);
 
-  const params = getTiltParams(level);
+  const params = getTiltParams(prog.ramp);
 
-  /* Pass-gated: 80+ climbs one rung (capped at L6); anything less replays
-     the same rung. Next run goes straight to the countdown. */
+  /* Next run waits for the CTA — no auto-advance */
   const handleNextRound = () => {
-    if (autoAdvanceTimer.current) {
-      clearTimeout(autoAdvanceTimer.current);
-      autoAdvanceTimer.current = null;
-    }
-    if ((roundData.score ?? 0) >= 80) setLevel((l) => Math.min(6, l + 1));
+    setTimedOut(false);
     setRoundData(setupTiltRound());
     setRound((r) => r + 1);
     setStage("countdown");
-    setCountdown(5);
   };
 
   useEffect(() => {
@@ -63,18 +59,7 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   }, [stage]);
 
   useEffect(() => {
-    if (stage === "reveal") {
-      playRevealInterval();
-
-      const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
-      const timer = setTimeout(handleNextRound, 5000);
-      autoAdvanceTimer.current = timer as unknown as number;
-
-      return () => {
-        clearInterval(interval);
-        clearTimeout(timer);
-      };
-    }
+    if (stage === "reveal") playRevealInterval();
   }, [stage]);
 
   /* RELATIVE drag: the line follows how far the pointer has swept around the
@@ -113,9 +98,21 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
 
   const handleDone = () => {
     if (stage !== "answer") return;
-    const score = scoreTilt(roundData.guessAngle, roundData.trueAngle, level);
+    const score = scoreTilt(roundData.guessAngle, roundData.trueAngle, prog.ramp);
     onResult?.(score >= 80); // 80 is the pass mark; passes feed the streak
+    setLastOutcome(prog.report(score >= 80, score));
     setRoundData((prev) => ({ ...prev, score }));
+    setStage("reveal");
+  };
+
+  /* Clock ran out before the lock-in — counts as a miss, scored 0 */
+  const handleTimeout = () => {
+    if (stage !== "answer") return;
+    triggerHaptic();
+    onResult?.(false);
+    setTimedOut(true);
+    setLastOutcome(prog.report(false, 0));
+    setRoundData((prev) => ({ ...prev, score: 0 }));
     setStage("reveal");
   };
 
@@ -132,18 +129,21 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
           ? "Anchor the line against an imaginary clock face next time."
           : "Angles drift fast in memory. Again.";
 
-  const status =
-    stage === "stimulus" ? "Memorize it" :
-    stage === "answer" ? "Set it back" :
-    stage === "reveal" ? `Next in ${countdown}s` :
-    `Round ${String(round).padStart(2, "0")}`;
-
   const truthEnds = lineEnds(roundData.trueAngle);
   const guessEnds = lineEnds(roundData.guessAngle);
 
   return (
-    <div id="tilt-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Match the Tilt" status={status} onBack={onBack} streak={streak} mono level={level} />
+    <div id="tilt-game-container" className="w-full flex flex-col flex-1 max-w-3xl mx-auto">
+      <GameHead
+        title="Match the Tilt"
+        onBack={onBack}
+        streak={prog.streak}
+        points={prog.points}
+        mono
+        gameId="tilt"
+        lives={<LivesBar lives={prog.lives} />}
+        onReset={prog.requestReset}
+      />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
@@ -173,6 +173,25 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
             <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-mut">
               Memorize this tilt
             </span>
+
+            {/* The glimpse is the difficulty here, so it is shown, not just
+                felt: a bar draining over exactly the exposure window, which
+                shortens run by run as the ramp climbs. */}
+            <div className="flex items-center gap-3 w-64 sm:w-72">
+              <span className="font-mono font-extrabold text-[11px] text-mut tabular-nums shrink-0">
+                {(params.exposure / 1000).toFixed(1)}s
+              </span>
+              <div className="flex-1 h-[10px] rounded-full border-2 border-ink overflow-hidden">
+                <motion.i
+                  key={`${round}-${params.exposure}`}
+                  className="block h-full bg-ink"
+                  initial={{ width: "100%" }}
+                  animate={{ width: "0%" }}
+                  transition={{ duration: params.exposure / 1000, ease: "linear" }}
+                />
+              </div>
+            </div>
+
             <div className="w-64 h-64 sm:w-72 sm:h-72 rounded-3xl border-[1.5px] border-line bg-paper">
               <svg viewBox="0 0 100 100" className="w-full h-full block" aria-hidden="true">
                 <line {...truthEnds} stroke="var(--color-ink)" strokeWidth="6" strokeLinecap="round" />
@@ -187,6 +206,16 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
               <b className="text-ink font-semibold">Set the line back.</b><br />
               Grab the handle and sweep it around — clicking alone won't move it.
             </p>
+
+            {prog.timerSeconds !== null && (
+              <RunTimer
+                id="tilt-run-timer"
+                seconds={prog.timerSeconds}
+                running={stage === "answer"}
+                runKey={round}
+                onExpire={handleTimeout}
+              />
+            )}
 
             {/* The dial — outlined because it's touchable. The knob on the
                 line's end is the drag affordance; the first-entry wiggle
@@ -222,11 +251,12 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
             <VerdictHead
               id="tilt-reveal-verdict"
               ok={score >= 80}
-              headline={verdictHead}
+              headline={timedOut ? "Time ran out." : verdictHead}
               score={String(score)}
               scoreCaption="Accuracy / 100"
               mono
             />
+            <OutcomeNote outcome={lastOutcome} />
 
             {/* Both lines overlaid — truth solid, yours dashed mid-grey */}
             <div className="w-56 h-56 sm:w-64 sm:h-64 rounded-3xl border-[1.5px] border-line bg-paper">
@@ -246,13 +276,11 @@ export const TiltGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
 
             <VerdictBody id="tilt-reveal-score" detail={verdictDetail} />
 
-            <div className="flex flex-col items-center gap-4">
-              <Btn id="tilt-next-btn" variant="secondary" onClick={handleNextRound}>Next tilt</Btn>
-              <NextIn seconds={countdown} />
-            </div>
+            <Btn id="tilt-next-btn" variant="secondary" onClick={handleNextRound}>Next tilt</Btn>
           </div>
         )}
       </div>
+      {prog.overlays}
     </div>
   );
 };

@@ -17,9 +17,12 @@ import {
   TallyShape,
 } from "../types";
 
-export function setupSwatchRound(): SwatchRoundData {
+/* Color Match: the level adds distractor tiles — L1 has 5 impostors,
+   each level adds one more (L6 = 10 impostors + the true color). */
+export function setupSwatchRound(ramp = 1): SwatchRoundData {
   const targetColor = generateRandomColor();
-  const options = generateSwatchOptions(targetColor);
+  const level = Math.max(1, Math.min(6, Math.floor(ramp + 0.4)));
+  const options = generateSwatchOptions(targetColor, 4 + level);
   return {
     targetColor,
     options,
@@ -27,19 +30,62 @@ export function setupSwatchRound(): SwatchRoundData {
   };
 }
 
-export function setupMixRound(): MixRoundData {
+/* Color Mixer rounds by level:
+   L1 hue dial only (sat/light inherited from the target),
+   L2 +saturation, L3 +lightness (the classic three-dial mix),
+   L4 +opacity over a checkerboard,
+   L5 two overlapping half-opacity circles — sat/light lock, one hue dial
+      per circle, the target is their intersection,
+   L6 a third circle joins; the target is the triple intersection. */
+export function setupMixRound(level = 3): MixRoundData {
   const targetColor = generateRandomColor();
-  // Generate a starting user color that is quite different
-  // Hue is shifted by 120 - 240 degrees (so it's clearly distinct)
   const hOffset = 120 + Math.floor(Math.random() * 120);
   const sOffset = (Math.random() > 0.5 ? 1 : -1) * (20 + Math.floor(Math.random() * 15));
   const lOffset = (Math.random() > 0.5 ? 1 : -1) * (15 + Math.floor(Math.random() * 15));
 
+  if (level >= 5) {
+    /* Blend levels: keep the body colors juicy so the average stays legible */
+    const base = {
+      h: targetColor.h,
+      s: 60 + Math.floor(Math.random() * 20),
+      l: 48 + Math.floor(Math.random() * 12),
+    };
+    const n = level >= 6 ? 3 : 2;
+    const targetHues = Array.from({ length: n }, (_, i) =>
+      Math.round((base.h + i * (110 + Math.random() * 40)) % 360)
+    );
+    const userHues = targetHues.map(
+      (h) => Math.round(h + 90 + Math.random() * 180) % 360
+    );
+    return {
+      targetColor: base,
+      userColor: { ...base, h: userHues[0] },
+      targetHues,
+      userHues,
+      score: null,
+    };
+  }
+
   const userColor = {
     h: (targetColor.h + hOffset) % 360,
-    s: Math.max(15, Math.min(95, targetColor.s + sOffset)),
-    l: Math.max(20, Math.min(85, targetColor.l + lOffset)),
+    s: level >= 2 ? Math.max(15, Math.min(95, targetColor.s + sOffset)) : targetColor.s,
+    l: level >= 3 ? Math.max(20, Math.min(85, targetColor.l + lOffset)) : targetColor.l,
   };
+
+  if (level >= 4) {
+    const targetAlpha = 0.4 + Math.floor(Math.random() * 11) * 0.05; // 0.40-0.90
+    let userAlpha = 0.4 + Math.floor(Math.random() * 11) * 0.05;
+    if (Math.abs(userAlpha - targetAlpha) < 0.15) {
+      userAlpha = targetAlpha >= 0.65 ? targetAlpha - 0.25 : targetAlpha + 0.25;
+    }
+    return {
+      targetColor,
+      userColor,
+      targetAlpha: Math.round(targetAlpha * 100) / 100,
+      userAlpha: Math.round(userAlpha * 100) / 100,
+      score: null,
+    };
+  }
 
   return {
     targetColor,
@@ -54,6 +100,35 @@ export function setupMixRound(): MixRoundData {
    - levels 5-9:  the board grows, 5 → 9 pads, sequence = every pad once
    - levels 10+:  repeats unlock — the sequence outgrows the board (10, 11, …)
    - levels 14+:  the board grows again, up to 12 pads, sequence keeps growing */
+/* Fixed 6-rung ladder — every rung moves the sequence, not just the clock.
+   L2 can't grow the 2x2 board usefully, so the sequence outgrows it
+   instead (a pad repeats). Fed a FLOAT level (the run ramp): speed
+   interpolates continuously, board/sequence bump near the cycle's end. */
+const ECHO_TABLE = [
+  { boxes: 4, seqLen: 4, speed: 600 },
+  { boxes: 4, seqLen: 5, speed: 520 },
+  { boxes: 5, seqLen: 5, speed: 460 },
+  { boxes: 6, seqLen: 6, speed: 400 },
+  { boxes: 7, seqLen: 8, speed: 360 },
+  { boxes: 9, seqLen: 10, speed: 320 },
+];
+export const getEchoParamsForLevel = (ramp: number): EchoParams => {
+  const t = Math.max(1, Math.min(6, ramp));
+  const lo = ECHO_TABLE[Math.floor(t) - 1];
+  const hi = ECHO_TABLE[Math.min(6, Math.ceil(t)) - 1];
+  const frac = t - Math.floor(t);
+  /* Discrete knobs bump on the cycle's back half */
+  const disc = frac >= 0.6 ? hi : lo;
+  const boxes = disc.boxes;
+  const seqLen = disc.seqLen;
+  return {
+    boxes,
+    seqLen,
+    speed: Math.round(lo.speed + (hi.speed - lo.speed) * frac),
+    allowRepeat: seqLen > boxes,
+  };
+};
+
 export function getEchoParams(level: number): EchoParams {
   const speeds = [600, 530, 460, 390, 320];
   const speed = speeds[Math.min(level, speeds.length - 1)];
@@ -92,7 +167,11 @@ export function setupEchoRound(params: EchoParams = getEchoParams(0)): EchoRound
 
   let sequence: number[];
   if (allowRepeat) {
-    sequence = Array.from({ length: seqLen }, () => Math.floor(Math.random() * boxes));
+    /* Every pad appears at least once, then the overflow re-draws pads at
+       random — the repeat is guaranteed, its position isn't */
+    const base = shuffleArray(Array.from({ length: boxes }, (_, i) => i));
+    const extra = Array.from({ length: seqLen - boxes }, () => Math.floor(Math.random() * boxes));
+    sequence = shuffleArray([...base, ...extra]);
   } else {
     // Random permutation of all pads
     sequence = shuffleArray(Array.from({ length: boxes }, (_, i) => i)).slice(0, seqLen);
@@ -128,20 +207,22 @@ export function setupBetweenRound(): BetweenRoundData {
   };
 }
 
-export function setupShiftRound(): ShiftRoundData {
-  // Generate 4 cohesive different colors
+/* Spot the Difference: the level adds a tile — L1 is the classic 4,
+   L6 reaches 9. */
+export function setupShiftRound(ramp = 1): ShiftRoundData {
+  const tiles = 3 + Math.max(1, Math.min(6, Math.floor(ramp + 0.4)));
   const startHue = Math.floor(Math.random() * 360);
   const originalColors: HSL[] = [];
-  
-  for (let i = 0; i < 4; i++) {
+
+  for (let i = 0; i < tiles; i++) {
     originalColors.push({
-      h: (startHue + i * 40 + Math.floor(Math.random() * 15)) % 360,
+      h: (startHue + i * Math.floor(360 / tiles) + Math.floor(Math.random() * 15)) % 360,
       s: 55 + Math.floor(Math.random() * 15),
       l: 45 + Math.floor(Math.random() * 15),
     });
   }
 
-  const shiftedIndex = Math.floor(Math.random() * 4);
+  const shiftedIndex = Math.floor(Math.random() * tiles);
   const shiftedColors = [...originalColors];
   
   // Apply a subtle shifted difference to the chosen index
@@ -188,7 +269,9 @@ export function setupShiftRound(): ShiftRoundData {
 function scatterPoints(count: number): { x: number; y: number; r: number }[] {
   const points: { x: number; y: number; r: number }[] = [];
   let attempts = 0;
-  while (points.length < count && attempts < 300) {
+  /* Dense boards (25+) need a tighter packing radius to physically fit */
+  const spacing = count > 24 ? 9.5 : 12;
+  while (points.length < count && attempts < 900) {
     attempts++;
     const x = Math.random() * 70 + 15;
     const y = Math.random() * 70 + 15;
@@ -197,7 +280,7 @@ function scatterPoints(count: number): { x: number; y: number; r: number }[] {
     let tooClose = false;
     for (const p of points) {
       const dist = Math.hypot(p.x - x, p.y - y);
-      if (dist < 12) { // Spacing collision radius
+      if (dist < spacing) { // Spacing collision radius
         tooClose = true;
         break;
       }
@@ -234,36 +317,43 @@ function tallyOptions(trueCount: number): number[] {
 
 const TALLY_SHAPES: TallyShape[] = ["circle", "square", "triangle"];
 
-export function setupTallyRound(roundNumber: number = 1, mode: TallyMode = "dots"): TallyRoundData {
+/* Piece-count BANDS per level, both tally modes, hard-capped at 30.
+   Every run draws fresh from its band so two runs of the same level
+   rarely share a count; the band's floor also creeps up across the
+   5-run cycle (the fractional part of the ramp). */
+export const TALLY_LEVEL_BANDS: [number, number][] = [
+  [5, 7],
+  [8, 11],
+  [12, 15],
+  [16, 20],
+  [21, 25],
+  [26, 30],
+];
+const tallyCountFor = (ramp: number) => {
+  const t = Math.max(1, Math.min(6, ramp));
+  const [lo, hi] = TALLY_LEVEL_BANDS[Math.floor(t) - 1];
+  const creep = Math.round((t - Math.floor(t)) * (hi - lo) * 0.5);
+  const min = Math.min(30, lo + creep);
+  return Math.min(30, min + Math.floor(Math.random() * (hi - min + 1)));
+};
+
+/* Dots-mode drop tempo, ms per piece, interpolated along the ramp */
+const TALLY_SPEED = [250, 215, 180, 150, 120, 95];
+export const getTallyPopSpeed = (ramp: number): number => {
+  const t = Math.max(1, Math.min(6, ramp));
+  const lo = TALLY_SPEED[Math.floor(t) - 1];
+  const hi = TALLY_SPEED[Math.min(6, Math.ceil(t)) - 1];
+  return Math.round(lo + (hi - lo) * (t - Math.floor(t)));
+};
+
+export function setupTallyRound(ramp: number = 1, mode: TallyMode = "dots"): TallyRoundData {
   if (mode === "shapes") {
-    return setupTallyShapesRound(roundNumber);
+    return setupTallyShapesRound(ramp);
   }
 
-  // Dots mode — quantity and speed ramp with consecutive correct runs
-  // Round 1: 5 - 7 dots
-  // Round 2: 7 - 10 dots
-  // Round 3: 10 - 13 dots
-  // Round 4: 13 - 16 dots
-  // Round 5+: 16 - 24 dots
-  let minCount = 5;
-  let maxCount = 7;
-
-  if (roundNumber === 2) {
-    minCount = 7;
-    maxCount = 10;
-  } else if (roundNumber === 3) {
-    minCount = 10;
-    maxCount = 13;
-  } else if (roundNumber === 4) {
-    minCount = 13;
-    maxCount = 16;
-  } else if (roundNumber >= 5) {
-    minCount = 16;
-    maxCount = Math.min(24, 15 + roundNumber);
-  }
-
-  const trueCount = Math.floor(Math.random() * (maxCount - minCount + 1)) + minCount;
-  const points = scatterPoints(trueCount);
+  const points = scatterPoints(tallyCountFor(ramp));
+  /* The scatter is best-effort at dense counts — count what actually landed */
+  const trueCount = points.length;
 
   return {
     points,
@@ -277,9 +367,8 @@ export function setupTallyRound(roundNumber: number = 1, mode: TallyMode = "dots
 /* Shapes mode — the alternative unlocked after counting 20+ dots. The board
    mixes circles, squares and triangles and asks for the count of ONE shape.
    Difficulty grows through quantity, not speed. */
-export function setupTallyShapesRound(roundNumber: number = 1): TallyRoundData {
-  const total = Math.min(26, 11 + (roundNumber - 1) * 3);
-  const bare = scatterPoints(total);
+export function setupTallyShapesRound(ramp: number = 1): TallyRoundData {
+  const bare = scatterPoints(tallyCountFor(ramp));
 
   // Deal shapes out evenly, then shuffle positions so no shape clusters
   const deck: TallyShape[] = shuffleArray(bare.map((_, i) => TALLY_SHAPES[i % TALLY_SHAPES.length]));

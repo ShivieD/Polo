@@ -7,7 +7,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { ChainRoundData, ShapeKind } from "../../types";
 import { setupChainRound, getChainParams, CHAIN_STEP_MS } from "../../utils/shapeLogic";
-import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, Wobble } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, Btn, Wobble } from "../ui/Kit";
+import { useProgression, LivesBar, RunTimer, OutcomeNote } from "../ui/Progress";
+import { RunOutcome } from "../../utils/progression";
 import { ChainGlyph, ShapeSvg } from "../ui/ShapeGlyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -22,36 +24,34 @@ interface GameProps {
    Shapes land one by one along a row of positions; play them back in order
    from the palette. The level schedule grows the row, then lets shapes
    repeat, then draws them all from one look-alike family. Greyscale only. */
-export const ChainGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
-  const [level, setLevel] = useState(1);
+export const ChainGame: React.FC<GameProps> = ({ onBack, onResult }) => {
+  const prog = useProgression("chain");
   const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
-  const [roundData, setRoundData] = useState<ChainRoundData>(() => setupChainRound(1));
+  const [roundData, setRoundData] = useState<ChainRoundData>(() => setupChainRound(prog.ramp));
   const [round, setRound] = useState(1);
   /* Which position is currently flashing its shape (stimulus + replay) */
   const [liveIndex, setLiveIndex] = useState<number>(-1);
   const [replaying, setReplaying] = useState(false);
-  const [countdown, setCountdown] = useState<number>(5);
+  const [lastOutcome, setLastOutcome] = useState<RunOutcome | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
   const timers = useRef<number[]>([]);
 
-  const params = getChainParams(level);
+  const params = getChainParams(prog.ramp);
 
   const clearTimers = () => {
     timers.current.forEach((t) => clearTimeout(t));
     timers.current = [];
   };
 
-  /* Pass-gated: only a perfect chain climbs a rung (capped at L6) — a miss
-     replays the same rung. Next run goes straight to the countdown. */
+  /* Next run waits for the CTA — no auto-advance */
   const handleNextRound = () => {
     clearTimers();
-    const nextLevel = roundData.isCorrect ? Math.min(6, level + 1) : level;
-    setLevel(nextLevel);
-    setRoundData(setupChainRound(nextLevel));
+    setTimedOut(false);
+    setRoundData(setupChainRound(prog.ramp));
     setRound((r) => r + 1);
     setLiveIndex(-1);
     setReplaying(false);
     setStage("countdown");
-    setCountdown(5);
   };
 
   /* Fire the sequence — each position flashes its shape, with an off-gap so
@@ -91,15 +91,7 @@ export const ChainGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
         }, 800 + roundData.sequence.length * CHAIN_STEP_MS + 300)
       );
 
-      const totalMs = 800 + roundData.sequence.length * CHAIN_STEP_MS + 3500;
-      setCountdown(Math.ceil(totalMs / 1000));
-      const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
-      timers.current.push(window.setTimeout(handleNextRound, totalMs));
-
-      return () => {
-        clearInterval(interval);
-        clearTimers();
-      };
+      return clearTimers;
     }
   }, [stage, roundData.sequence]);
 
@@ -116,21 +108,27 @@ export const ChainGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
     if (updated.length === params.len) {
       const isCorrect = updated.join(",") === roundData.sequence.join(",");
       onResult?.(isCorrect); // record the result once, at answer time
+      setLastOutcome(prog.report(isCorrect, isCorrect ? 100 : 0));
       setRoundData((prev) => ({ ...prev, isCorrect }));
       setStage("reveal");
     }
+  };
+
+  /* Clock ran out mid-rebuild — counts as a miss, same as a wrong link */
+  const handleTimeout = () => {
+    if (stage !== "answer") return;
+    triggerHaptic();
+    onResult?.(false);
+    setTimedOut(true);
+    setLastOutcome(prog.report(false, 0));
+    setRoundData((prev) => ({ ...prev, isCorrect: false }));
+    setStage("reveal");
   };
 
   const handleUndo = () => {
     if (stage !== "answer" || roundData.userSeq.length === 0) return;
     setRoundData((prev) => ({ ...prev, userSeq: prev.userSeq.slice(0, -1) }));
   };
-
-  const status =
-    stage === "stimulus" ? "Watch the chain" :
-    stage === "answer" ? `Your turn · ${roundData.userSeq.length}/${params.len}` :
-    stage === "reveal" ? `Next in ${countdown}s` :
-    `Round ${String(round).padStart(2, "0")}`;
 
   /* The row of positions. `filled` decides what a slot shows when it isn't
      the one currently flashing. */
@@ -159,8 +157,17 @@ export const ChainGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
   const userFilled = Array.from({ length: params.len }, (_, i) => roundData.userSeq[i] ?? null);
 
   return (
-    <div id="chain-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Repeat the Chain" status={status} onBack={onBack} streak={streak} mono level={level} />
+    <div id="chain-game-container" className="w-full flex flex-col flex-1 max-w-3xl mx-auto">
+      <GameHead
+        title="Repeat the Chain"
+        onBack={onBack}
+        streak={prog.streak}
+        points={prog.points}
+        mono
+        gameId="chain"
+        lives={<LivesBar lives={prog.lives} />}
+        onReset={prog.requestReset}
+      />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
@@ -194,11 +201,22 @@ export const ChainGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
               Rebuild the chain · {roundData.userSeq.length}/{params.len}
             </span>
 
+            {/* Countdown starts only once the chain has finished landing */}
+            {prog.timerSeconds !== null && (
+              <RunTimer
+                id="chain-run-timer"
+                seconds={prog.timerSeconds}
+                running={stage === "answer"}
+                runKey={round}
+                onExpire={handleTimeout}
+              />
+            )}
+
             {slotRow(userFilled, -1, "chain-answer-slot")}
 
             {/* The palette — every shape used this round, outlined because
                 it's touchable */}
-            <div className="flex justify-center flex-wrap gap-3">
+            <div className="flex justify-center flex-nowrap gap-3 w-full max-w-3xl">
               {roundData.pool.map((kind) => (
                 <button
                   key={kind}
@@ -228,12 +246,13 @@ export const ChainGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
             <VerdictHead
               id="chain-reveal-verdict"
               ok={!!roundData.isCorrect}
-              headline={roundData.isCorrect ? "Perfect chain." : "A link slipped."}
+              headline={roundData.isCorrect ? "Perfect chain." : timedOut ? "Time ran out." : "A link slipped."}
               mono
             />
+            <OutcomeNote outcome={lastOutcome} />
 
             <Wobble active={!roundData.isCorrect} className="w-full">
-              <div className="flex flex-col items-center gap-5 w-full">
+              <div className="grid grid-cols-2 gap-6 w-full">
                 {/* The truth replays at the same tempo, then rests visible */}
                 <div className="flex flex-col items-center gap-2 w-full">
                   <span className="font-mono font-extrabold text-[11px] tracking-[0.16em] uppercase text-mut">
@@ -275,13 +294,11 @@ export const ChainGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => 
               }
             />
 
-            <div className="flex flex-col items-center gap-4">
-              <Btn id="chain-next-btn" variant="secondary" onClick={handleNextRound}>Next chain</Btn>
-              <NextIn seconds={countdown} />
-            </div>
+            <Btn id="chain-next-btn" variant="secondary" onClick={handleNextRound}>Next chain</Btn>
           </div>
         )}
       </div>
+      {prog.overlays}
     </div>
   );
 };

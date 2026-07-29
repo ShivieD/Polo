@@ -3,11 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { FormRoundData } from "../../types";
-import { setupFormRound, explainFormMiss, FORM_EXPOSURE_MS, FORM_MAX_LEVEL } from "../../utils/shapeLogic";
-import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, Wobble } from "../ui/Kit";
+import { setupFormRound, explainFormMiss, FORM_EXPOSURE_MS } from "../../utils/shapeLogic";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, Btn, Wobble } from "../ui/Kit";
+import { useProgression, LivesBar, RunTimer, OutcomeNote } from "../ui/Progress";
+import { RunOutcome } from "../../utils/progression";
 import { FormGlyph, ShapeSvg } from "../ui/ShapeGlyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -22,27 +24,20 @@ interface GameProps {
    two seconds, then six near-identical impostors. The level schedule
    tightens distractor similarity: families → neighbors → aspect → weight
    → 10% → 5% variations. Purely greyscale. */
-export const FormGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
-  const [level, setLevel] = useState(1);
+export const FormGame: React.FC<GameProps> = ({ onBack, onResult }) => {
+  const prog = useProgression("form");
   const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
-  const [roundData, setRoundData] = useState<FormRoundData>(() => setupFormRound(1));
+  const [roundData, setRoundData] = useState<FormRoundData>(() => setupFormRound(prog.ramp));
   const [round, setRound] = useState(1);
-  const [countdown, setCountdown] = useState<number>(4);
-  const autoAdvanceTimer = useRef<number | null>(null);
+  const [lastOutcome, setLastOutcome] = useState<RunOutcome | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
 
-  /* Pass-gated: a correct answer climbs one rung (capped at L8); a miss
-     replays the same rung. Next run goes straight to the countdown. */
+  /* Next run waits for the CTA — no auto-advance */
   const handleNextRound = () => {
-    if (autoAdvanceTimer.current) {
-      clearTimeout(autoAdvanceTimer.current);
-      autoAdvanceTimer.current = null;
-    }
-    const nextLevel = isUserCorrect ? Math.min(FORM_MAX_LEVEL, level + 1) : level;
-    setLevel(nextLevel);
-    setRoundData(setupFormRound(nextLevel));
+    setTimedOut(false);
+    setRoundData(setupFormRound(prog.ramp));
     setRound((r) => r + 1);
     setStage("countdown");
-    setCountdown(4);
   };
 
   useEffect(() => {
@@ -56,18 +51,7 @@ export const FormGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
   const isUserCorrect = roundData.userSelection === correctIdx;
 
   useEffect(() => {
-    if (stage === "reveal") {
-      playRevealInterval();
-
-      const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
-      const timer = setTimeout(handleNextRound, 4000);
-      autoAdvanceTimer.current = timer as unknown as number;
-
-      return () => {
-        clearInterval(interval);
-        clearTimeout(timer);
-      };
-    }
+    if (stage === "reveal") playRevealInterval();
   }, [stage]);
 
   const handleSelectOption = (idx: number) => {
@@ -75,19 +59,33 @@ export const FormGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
     playTick();
     triggerHaptic();
     onResult?.(idx === correctIdx); // record the result once, at answer time
+    setLastOutcome(prog.report(idx === correctIdx, idx === correctIdx ? 100 : 0));
     setRoundData((prev) => ({ ...prev, userSelection: idx }));
     setStage("reveal");
   };
 
-  const status =
-    stage === "stimulus" ? "Memorize it" :
-    stage === "answer" ? "Which one was it?" :
-    stage === "reveal" ? `Next in ${countdown}s` :
-    `Round ${String(round).padStart(2, "0")}`;
+  /* Clock ran out with no pick — counts as a miss */
+  const handleTimeout = () => {
+    if (stage !== "answer") return;
+    triggerHaptic();
+    onResult?.(false);
+    setTimedOut(true);
+    setLastOutcome(prog.report(false, 0));
+    setStage("reveal");
+  };
 
   return (
-    <div id="form-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Shape Match" status={status} onBack={onBack} streak={streak} mono level={level} />
+    <div id="form-game-container" className="w-full flex flex-col flex-1 max-w-3xl mx-auto">
+      <GameHead
+        title="Shape Match"
+        onBack={onBack}
+        streak={prog.streak}
+        points={prog.points}
+        mono
+        gameId="form"
+        lives={<LivesBar lives={prog.lives} />}
+        onReset={prog.requestReset}
+      />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
@@ -130,7 +128,16 @@ export const FormGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
             <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-ink">
               Tap the exact match
             </span>
-            <div className="grid grid-cols-3 gap-3 w-full max-w-sm">
+            {prog.timerSeconds !== null && (
+              <RunTimer
+                id="form-run-timer"
+                seconds={prog.timerSeconds}
+                running={stage === "answer"}
+                runKey={round}
+                onExpire={handleTimeout}
+              />
+            )}
+            <div className="grid grid-cols-6 gap-3 w-full max-w-3xl">
               {roundData.options.map((opt, idx) => (
                 <motion.button
                   key={idx}
@@ -154,14 +161,15 @@ export const FormGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
             <VerdictHead
               id="form-reveal-verdict"
               ok={isUserCorrect}
-              headline={isUserCorrect ? "Spot on." : "An impostor got you."}
+              headline={isUserCorrect ? "Spot on." : timedOut ? "Time ran out." : "An impostor got you."}
               mono
             />
+            <OutcomeNote outcome={lastOutcome} />
 
-            <Wobble active={!isUserCorrect} className="w-full max-w-sm flex justify-center">
+            <Wobble active={!isUserCorrect} className="w-full max-w-3xl flex justify-center">
               {/* Truth revealed alongside the guess — solid ink outline for
                   the correct shape, thin dashed mid-grey for a wrong pick */}
-              <div className="grid grid-cols-3 gap-3 w-full">
+              <div className="grid grid-cols-6 gap-3 w-full">
                 {roundData.options.map((opt, idx) => {
                   const isSelected = roundData.userSelection === idx;
                   return (
@@ -206,13 +214,11 @@ export const FormGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
               }
             />
 
-            <div className="flex flex-col items-center gap-4">
-              <Btn id="form-next-btn" variant="secondary" onClick={handleNextRound}>Next shape</Btn>
-              <NextIn seconds={countdown} />
-            </div>
+            <Btn id="form-next-btn" variant="secondary" onClick={handleNextRound}>Next shape</Btn>
           </div>
         )}
       </div>
+      {prog.overlays}
     </div>
   );
 };

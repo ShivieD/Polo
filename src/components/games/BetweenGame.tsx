@@ -8,7 +8,9 @@ import { motion } from "motion/react";
 import { BetweenRoundData } from "../../types";
 import { setupBetweenRound, interpolateHsl } from "../../utils/gameLogic";
 import { hslToCss } from "../../utils/color";
-import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, NextIn, Btn, PassNote } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, Btn, PassNote } from "../ui/Kit";
+import { useProgression, LivesBar, RunTimer, OutcomeNote } from "../ui/Progress";
+import { RunOutcome } from "../../utils/progression";
 import { BetweenGlyph } from "../ui/Glyphs";
 import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
@@ -23,24 +25,21 @@ interface GameProps {
    read poorly against the dark wash fill, yellow carries more contrast. */
 const CTA_ACCENT = "#ffc400";
 
-export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) => {
+export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }) => {
+  const prog = useProgression("between");
   const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
   const [roundData, setRoundData] = useState<BetweenRoundData>(() => setupBetweenRound());
   const [round, setRound] = useState(1);
-  const [countdown, setCountdown] = useState<number>(5);
-  const autoAdvanceTimer = useRef<number | null>(null);
+  const [lastOutcome, setLastOutcome] = useState<RunOutcome | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
   const isDragging = useRef(false);
 
-  /* Next run goes straight to the countdown — no detour to instructions */
+  /* Next run waits for the CTA — no auto-advance */
   const handleNextRound = () => {
-    if (autoAdvanceTimer.current) {
-      clearTimeout(autoAdvanceTimer.current);
-      autoAdvanceTimer.current = null;
-    }
+    setTimedOut(false);
     setRoundData(setupBetweenRound());
     setRound((r) => r + 1);
     setStage("countdown");
-    setCountdown(5);
   };
 
   useEffect(() => {
@@ -51,18 +50,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
   }, [stage]);
 
   useEffect(() => {
-    if (stage === "reveal") {
-      playRevealInterval();
-
-      const interval = setInterval(() => setCountdown((p) => Math.max(0, p - 1)), 1000);
-      const timer = setTimeout(handleNextRound, 5000);
-      autoAdvanceTimer.current = timer as unknown as number;
-
-      return () => {
-        clearInterval(interval);
-        clearTimeout(timer);
-      };
-    }
+    if (stage === "reveal") playRevealInterval();
   }, [stage]);
 
   const updatePosition = (clientX: number) => {
@@ -95,7 +83,19 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
     if (stage !== "answer") return;
     const score = Math.round(100 * (1 - Math.abs(roundData.guessPosition - roundData.truePosition)));
     onResult?.(score >= 80); // 80 is the pass mark; passes feed the streak
+    setLastOutcome(prog.report(score >= 80, score));
     setRoundData((prev) => ({ ...prev, score }));
+    setStage("reveal");
+  };
+
+  /* Clock ran out with no lock-in — counts as a zero-score miss */
+  const handleTimeout = () => {
+    if (stage !== "answer") return;
+    triggerHaptic();
+    onResult?.(false);
+    setTimedOut(true);
+    setLastOutcome(prog.report(false, 0));
+    setRoundData((prev) => ({ ...prev, score: 0 }));
     setStage("reveal");
   };
 
@@ -109,7 +109,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
 
   const score = roundData.score ?? 0;
   const verdictHead =
-    score >= 95 ? "Surgical." : score >= 80 ? "Sharp eye." : score >= 60 ? "Close." : "Off the mark.";
+    timedOut ? "Time ran out." : score >= 95 ? "Surgical." : score >= 80 ? "Sharp eye." : score >= 60 ? "Close." : "Off the mark.";
   const verdictDetail =
     score >= 95
       ? "That is elite hue discrimination."
@@ -119,15 +119,18 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
           ? "Watch the lightness, not just the hue."
           : "The gradient lies to everyone at first. Again.";
 
-  const status =
-    stage === "stimulus" ? "Memorize it" :
-    stage === "answer" ? "Where does it live?" :
-    stage === "reveal" ? `Next in ${countdown}s` :
-    `Round ${String(round).padStart(2, "0")}`;
-
   return (
-    <div id="between-game-container" className="w-full flex flex-col flex-1 max-w-xl mx-auto">
-      <GameHead title="Find the Spot" status={status} onBack={onBack} streak={streak} />
+    <div id="between-game-container" className="w-full flex flex-col flex-1 max-w-3xl mx-auto">
+      <GameHead
+        title="Find the Spot"
+        onBack={onBack}
+        streak={prog.streak}
+        points={prog.points}
+        lives={<LivesBar lives={prog.lives} />}
+        onReset={prog.requestReset}
+        gameId="between"
+        accent={accentColor}
+      />
 
       <div className="flex-1 flex flex-col justify-center pb-6">
         {stage === "getReady" && (
@@ -159,7 +162,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
             </span>
             <div
               id="between-gradient-bar"
-              className="w-full max-w-md h-24 rounded-full border-[1.5px] border-line"
+              className="w-full max-w-xl h-24 rounded-full border-[1.5px] border-line"
               style={{ background: gradientStyle }}
             />
           </motion.div>
@@ -167,6 +170,18 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
 
         {stage === "answer" && (
           <div className="flex flex-col items-center w-full gap-7">
+            <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-ink">
+              Where does it live?
+            </span>
+            {prog.timerSeconds !== null && (
+              <RunTimer
+                id="between-run-timer"
+                seconds={prog.timerSeconds}
+                running={stage === "answer"}
+                runKey={round}
+                onExpire={handleTimeout}
+              />
+            )}
             {/* Target specimen */}
             <div className="flex items-center gap-5">
               <div
@@ -181,7 +196,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
             </div>
 
             {/* The hidden bar — outlined because it's touchable */}
-            <div className="w-full max-w-md">
+            <div className="w-full max-w-xl">
               <div
                 id="between-empty-bar"
                 onPointerDown={handlePointerDown}
@@ -214,10 +229,11 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
               score={String(score)}
               scoreCaption="Accuracy / 100"
             />
+            <OutcomeNote outcome={lastOutcome} />
 
             {/* Gradient with staggered pins: Correct above, Your below — the
                 tags can never collide, even on a perfect guess */}
-            <div className="w-full max-w-md pt-9 pb-8">
+            <div className="w-full max-w-xl pt-9 pb-8">
               <div className="relative w-full h-14 rounded-full border-[1.5px] border-line" style={{ background: gradientStyle }}>
                 <motion.div
                   id="between-marker-true"
@@ -248,13 +264,11 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, streak }) =
 
             <VerdictBody id="between-reveal-score" detail={verdictDetail} />
 
-            <div className="flex flex-col items-center gap-4">
-              <Btn id="between-next-btn" variant="secondary" onClick={handleNextRound}>Next color</Btn>
-              <NextIn seconds={countdown} />
-            </div>
+            <Btn id="between-next-btn" variant="secondary" onClick={handleNextRound}>Next color</Btn>
           </div>
         )}
       </div>
+      {prog.overlays}
     </div>
   );
 };
