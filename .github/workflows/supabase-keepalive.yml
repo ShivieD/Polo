@@ -1,0 +1,57 @@
+name: Supabase keep-alive
+
+# Supabase free-tier projects are paused after 7 days with no database
+# activity. A plain request to the deployed site is not enough — the ping
+# has to actually touch Postgres. This runs a tiny authenticated REST read
+# against game_stats twice a week, which registers as real DB activity and
+# resets the inactivity clock.
+#
+# Scheduled workflows only run from the default branch, so this file must be
+# on main to take effect. It reads two repo secrets (Settings > Secrets and
+# variables > Actions):
+#   SUPABASE_URL  — https://<project-ref>.supabase.co
+#   SUPABASE_KEY  — the publishable/anon key (already shipped in the client,
+#                   so this is not a sensitive secret; it lives here only so
+#                   the key can be rotated without editing the workflow).
+
+on:
+  schedule:
+    # 03:17 UTC every Monday and Thursday. The odd minute dodges the
+    # top-of-hour congestion when GitHub delays scheduled jobs; Mon/Thu
+    # leaves at most ~4 days between pings, comfortably under the 7-day
+    # pause threshold even if one run is delayed or dropped.
+    - cron: '17 3 * * 1,4'
+  # Lets you trigger a run by hand from the Actions tab to confirm setup.
+  workflow_dispatch: {}
+
+# No repo contents are needed; keep the token read-only.
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read game_stats to register DB activity
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_KEY:-}" ]; then
+            echo "::error::SUPABASE_URL and/or SUPABASE_KEY secret is not set."
+            exit 1
+          fi
+          code=$(curl -sS --max-time 30 -o /tmp/body.json -w '%{http_code}' \
+            "${SUPABASE_URL}/rest/v1/game_stats?select=player_id&limit=1" \
+            -H "apikey: ${SUPABASE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_KEY}")
+          echo "HTTP ${code}"
+          head -c 400 /tmp/body.json || true
+          echo
+          if [ "${code}" != "200" ]; then
+            echo "::error::Keep-alive query failed with HTTP ${code}. Project may be paused or the key/URL is wrong."
+            exit 1
+          fi
+          echo "Keep-alive succeeded — Supabase inactivity clock reset."
