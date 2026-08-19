@@ -57,6 +57,41 @@ export function playTick() {
   }
 }
 
+/* Falling pieces in the two counting games. Deliberately unlike playTick —
+   that is the countdown's voice, and reusing it made a board of thirty
+   dropping pieces sound like a timer running out. This is a soft low
+   triangle thud with no pitch slide. */
+export function playDrop() {
+  if (!soundEnabled) return;
+  try {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+    osc.type = "triangle";
+    /* A touch of jitter so a fast run of pieces does not machine-gun one pitch */
+    const base = 190 + Math.random() * 40;
+    osc.frequency.setValueAtTime(base, now);
+    osc.frequency.exponentialRampToValueAtTime(base * 0.72, now + 0.07);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.075, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+
+    osc.start(now);
+    osc.stop(now + 0.1);
+  } catch (e) {
+    console.warn("Audio drop play error", e);
+  }
+}
+
 export function playRevealInterval() {
   if (!soundEnabled) return;
   try {

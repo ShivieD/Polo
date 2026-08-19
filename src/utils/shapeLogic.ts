@@ -31,15 +31,21 @@ const rand = (min: number, max: number) => min + Math.random() * (max - min);
 const randInt = (min: number, max: number) => Math.floor(rand(min, max + 1));
 const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
+/* Floor, not round: a ramp is a whole level, and rounding would let 4.6
+   behave as level 5 if a fraction ever reached here. */
 const clampLevel = (level: number, max = 6): ShapeLevel =>
-  Math.max(1, Math.min(max, Math.round(level))) as ShapeLevel;
+  Math.max(1, Math.min(max, Math.floor(level))) as ShapeLevel;
 
 /* Run-ramp plumbing: getters take a FLOAT level (level + cycle fraction).
    Continuous knobs lerp between adjacent table rows; discrete knobs jump
    to the next row on the cycle's back half (frac >= 0.6). */
+/* Floored deliberately. Difficulty is a step function of the level: every
+   run inside a cycle must draw from the same band, so there is no partial
+   position between two levels to interpolate against. Keeping the floor
+   here means the invariant holds even if a caller passes a fraction. */
 const rampParts = (ramp: number, max = 6) => {
-  const t = Math.max(1, Math.min(max, ramp));
-  return { lo: Math.floor(t) - 1, hi: Math.min(max, Math.ceil(t)) - 1, frac: t - Math.floor(t) };
+  const t = Math.floor(Math.max(1, Math.min(max, ramp)));
+  return { lo: t - 1, hi: t - 1, frac: 0 };
 };
 const lerp = (a: number, b: number, f: number) => a + (b - a) * f;
 
@@ -67,93 +73,63 @@ export const FORM_MAX_LEVEL = 8;
    difficulty doesn't cliff: families → neighbors → mixed → coarse aspect →
    fine aspect → paint → ±12% size → ±7% size. */
 export function setupFormRound(rampIn: number): FormRoundData {
-  /* Run ramp: recipes bump on the cycle's back half; inside a recipe the
-     numeric knobs tighten with cycle progress so every run is a shade
-     harder than the last. */
-  const t = Math.max(1, Math.min(FORM_MAX_LEVEL, rampIn));
-  const level = Math.floor(t);
-  /* Cycle progress 0->1. The recipe is pinned to the level for the whole
-     cycle: only the numeric knobs inside it tighten run by run, so the board
-     never changes composition mid-level. runsInLevel/5 tops out at 0.8. */
-  const f = Math.min(1, (t - level) / 0.8);
-  const mixT = (a: number, b: number) => a + (b - a) * f;
+  const level = Math.max(1, Math.min(FORM_MAX_LEVEL, Math.floor(rampIn)));
   const kind = pick(ALL_KINDS);
   let specs: ShapeSpec[];
   let targetIdx: number;
 
+  /* Every level samples its distractors from a band instead of a fixed
+     table. The old recipes reused the same six aspect values every round,
+     so within a level you met the same board again and again with only the
+     shape family swapped. Bands keep the difficulty identical across a
+     cycle while making each round genuinely new. */
+  const spread = (n: number, lo: number, hi: number, sign: "both" | "up" = "both") =>
+    Array.from({ length: n }, () => {
+      const m = rand(lo, hi);
+      return sign === "up" ? m : Math.random() > 0.5 ? m : -m;
+    });
+
   if (level === 1) {
-    /* Two near-neighbors are in the lineup from the very first run — an
-       all-distinct-families board was a freebie — and the rest crowd in
-       run by run until L1 ends on a full neighbor set. */
-    const neighborCount = 2 + Math.round(f * 3);
-    const neighbors = SIMILAR[kind].slice(0, neighborCount);
-    const fillers = shuffle(ALL_KINDS.filter((k) => k !== kind && !neighbors.includes(k))).slice(
-      0,
-      5 - neighborCount
-    );
-    const kinds = [kind, ...neighbors, ...fillers];
-    specs = kinds.map((k) => ({ kind: k }));
+    /* The one teaching level: three near-neighbour families beside two
+       unrelated ones, so the answer is findable but not free. */
+    const neighbours = SIMILAR[kind].slice(0, 3);
+    const fillers = shuffle(ALL_KINDS.filter((k) => k !== kind && !neighbours.includes(k))).slice(0, 2);
+    specs = [kind, ...neighbours, ...fillers].map((k) => ({ kind: k }));
     targetIdx = 0;
   } else if (level === 2) {
-    /* Four near-neighbors plus two stretched twins of the target itself —
-       same silhouette, wrong proportion — which tighten run by run */
-    specs = [
-      { kind },
-      ...SIMILAR[kind].slice(0, 4).map((k) => ({ kind: k })),
-      { kind, aspect: mixT(0.62, 0.78) },
-    ];
+    /* All five distractors are near-neighbour families now — L2 used to
+       carry four neighbours plus a stretched twin and read as a freebie. */
+    const neighbours = SIMILAR[kind].slice(0, 5);
+    const fillers = shuffle(ALL_KINDS.filter((k) => k !== kind && !neighbours.includes(k)))
+      .slice(0, Math.max(0, 5 - neighbours.length));
+    specs = [kind, ...neighbours, ...fillers].slice(0, 6).map((k) => ({ kind: k }));
     targetIdx = 0;
-  } else if (level === 3) {
-    /* Near-neighbors plus stretched twins that straighten out run by run */
-    specs = [
-      { kind },
-      ...SIMILAR[kind].slice(0, 3).map((k) => ({ kind: k })),
-      { kind, aspect: mixT(0.6, 0.74) },
-      { kind, aspect: mixT(1.55, 1.32) },
-    ];
+  } else if (level <= 5) {
+    /* Same silhouette, aspect ratio only. The band tightens per level and
+       each of the five distractors draws its own offset. */
+    const band: [number, number] = level === 3 ? [0.26, 0.42] : level === 4 ? [0.17, 0.26] : [0.11, 0.17];
+    const offs = spread(5, band[0], band[1]);
+    specs = [{ kind, aspect: 1 }, ...offs.map((o) => ({ kind, aspect: +(1 + o).toFixed(3) }))];
     targetIdx = 0;
-  } else if (level === 4) {
-    /* Same shape, aspect ratios drifting from blatant toward subtle */
-    const a4 = [1, 0.5, 0.7, 1.4, 1.9, 0.33];
-    const a5 = [1, 0.72, 0.85, 1.18, 1.4, 0.6];
-    const aspects = shuffle(a4.map((a, i) => mixT(a, a5[i])));
-    specs = aspects.map((aspect) => ({ kind, aspect }));
-    targetIdx = aspects.indexOf(1);
-  } else if (level === 5) {
-    /* Same shape, subtler aspect ratios, converging further per run */
-    const a5 = [1, 0.72, 0.85, 1.18, 1.4, 0.6];
-    const a5b = [1, 0.8, 0.9, 1.12, 1.26, 0.68];
-    const aspects = shuffle(a5.map((a, i) => mixT(a, a5b[i])));
-    specs = aspects.map((aspect) => ({ kind, aspect }));
-    targetIdx = aspects.indexOf(1);
   } else if (level === 6) {
-    /* Same shape, varying line weight or fill */
-    /* Every tile is stroked at the same fill state — only line weight
-       separates them, on a geometric ladder whose ratio closes run by run.
-       The old set opened with a FILLED tile among five outlines and jumped
-       4->22px, which made L6 read easier than L5's aspect work. */
-    /* Ratio picked so the closest pair separates by less than L5's aspect
-       work and hands off cleanly to L7's size steps. Base 6 keeps the
-       ladder centred on the app's default weight of 7, which keeps the
-       closest pair separated by ~1 CSS pixel on an 82px tile — the ratios,
-       and so the difficulty, are identical to a thinner base. */
-    const ratio = mixT(1.15, 1.12);
-    const weights = shuffle([0, 1, 2, 3, 4, 5].map((k) => 7 * Math.pow(ratio, k)));
+    /* Line weight, on a ladder centred near the app's default of 7 so the
+       closest pair stays about a pixel apart at render size. */
+    const ratio = rand(1.13, 1.17);
+    const weights = [0, 1, 2, 3, 4, 5].map((k) => 7 * Math.pow(ratio, k));
     specs = weights.map((strokeW) => ({ kind, filled: false, strokeW }));
     targetIdx = randInt(0, 5);
   } else {
-    /* L7→L8: proportional size steps shrink continuously 12% → 7% */
-    const step = level === 7 ? mixT(0.12, 0.095) : mixT(0.095, 0.07);
+    /* L7-L8: proportional size steps. Base is derived from the step so the
+       largest tile lands just under the 1.0 ceiling and no gap is clamped. */
+    const step = level === 7 ? rand(0.105, 0.125) : rand(0.065, 0.085);
     const exps = [0, 1, 2, -1, -2, 3];
-    /* Anchor the largest tile just under the 1.0 ceiling. The old fixed 0.72
-       base pushed the top step past 1 and the clamp flattened the widest gap
-       from 12% to ~10.7%, so two tiles sat closer than the level intended. */
     const base = 0.98 / Math.pow(1 + step, Math.max(...exps));
-    const factors = shuffle(exps.map((k) => Math.pow(1 + step, k)));
+    const factors = exps.map((k) => Math.pow(1 + step, k));
     specs = factors.map((fac) => ({ kind, scale: base * fac }));
-    targetIdx = randInt(0, 5);
+    targetIdx = 0;
   }
 
+  /* Shuffle placement, keeping track of where the target landed */
   const order = shuffle(specs.map((_, i) => i));
   const options = order.map((i) => ({ spec: specs[i], isCorrect: i === targetIdx }));
   return { target: specs[targetIdx], options, userSelection: null };
@@ -259,10 +235,10 @@ const CHAIN_TABLE: ChainParams[] = [
   { len: 7, poolSize: 4, allowRepeat: true, sameFamily: true },
 ];
 
-export const getChainParams = (ramp: number): ChainParams => {
-  const { lo, hi, frac } = rampParts(ramp);
-  return CHAIN_TABLE[frac >= 0.6 ? hi : lo];
-};
+/* Indexed straight off the level. This used to jump to the next row once a
+   cycle passed 60%, so a level could start on a 4-step chain, move to 5,
+   and drop back to 4 on the next level's first run. */
+export const getChainParams = (ramp: number): ChainParams => CHAIN_TABLE[clampLevel(ramp) - 1];
 
 export const CHAIN_STEP_MS = 600;
 
@@ -371,101 +347,71 @@ export function scoreSquircle(
    - coarse: a big attribute change, 25-35 (medium)
    - fine:   a subtle change from the per-level table (hard)
    Higher levels skew harder but easy rounds never fully disappear. */
-const SHIFT_FINE_MAGNITUDE = [14, 11, 9, 7, 5, 3.5];
-/* Coarse changes were a flat rand(19,28) at every level, so a fifth of L6
-   rounds arrived as blatant as L1's. The band now closes with the level. */
-const SHIFT_COARSE_MAGNITUDE: [number, number][] = [
-  [19, 28], [17, 25], [15, 22], [13, 19], [11, 16], [9, 13],
-];
-/* L1 used to be half free swaps and no subtle rounds at all, which made the
-   opening levels a formality. Swaps are cut back and a real share of fine
-   rounds is present from L1 — the ladder still climbs, it just starts
-   somewhere worth playing. */
-/* [swap, coarse, fine]. A swap turns the shape into a different family —
-   unmissable, so it survives only as a first-levels teaching aid and is gone
-   by L5 rather than lingering at 5% forever. */
-const SHIFT_TIER_WEIGHTS: [number, number, number][] = [
-  [0.18, 0.50, 0.32],
-  [0.12, 0.46, 0.42],
-  [0.06, 0.40, 0.54],
-  [0.02, 0.32, 0.66],
-  [0.00, 0.24, 0.76],
-  [0.00, 0.15, 0.85],
+/* Spot the Shift ladder.
+ *
+ * One axis, stepped by level: how many of the four cells hold a DISTINCT
+ * shape. While cells still repeat, the change is always an attribute drift
+ * (rotation / size / corner radius) on an otherwise uniform-looking board.
+ * Only once all four cells are already different does a whole-shape swap
+ * become one of the possible changes — before that a swap is unmissable,
+ * because it is the only shape out of place on a matching board.
+ *
+ * The magnitude band closes with the level and is sampled per round, so two
+ * runs inside a level differ in content without differing in difficulty.
+ */
+const SHIFT_DISTINCT_KINDS = [1, 2, 3, 4, 4, 4];
+const SHIFT_ALLOW_SWAP = [false, false, false, false, true, true];
+const SHIFT_MAGNITUDE: [number, number][] = [
+  [14, 20], [11, 16], [9, 13], [7, 10], [5, 7.5], [3.5, 5],
 ];
 
 /* Kinds where every change type stays visible (no circles — rotation
    would be a no-op) */
 const SHIFT_KINDS: ShapeKind[] = ["square", "triangle", "arrow", "hexagon", "plus"];
 
-/* How often a round is a LINEUP — four different shapes with one swapped
-   for a fifth kind — rather than four identical shapes with one attribute
-   drifting. Constant across levels so the challenge TYPE stays
-   unpredictable from round one; the attribute rounds carry the
-   level-driven subtlety ramp. */
-/* Mixed-family lineups are the easiest board in the game. They used to fire
-   at a flat 22% forever, which capped how hard the game could ever feel. */
-const SHIFT_LINEUP_CHANCE = [0.22, 0.15, 0.09, 0.04, 0.01, 0];
-
-/* A lineup round: every cell its own shape, the changed one comes back as
-   a fifth kind not present in the original four. */
-function setupShiftLineupRound(): ShapeShiftRoundData {
-  const kinds = shuffle(ALL_KINDS).slice(0, 5);
-  const rotation = randInt(-8, 8);
-  const specFor = (kind: ShapeKind): ShapeSpec => ({
-    kind,
-    scale: 0.82,
-    rotation: kind === "square" ? 0 : rotation,
-    radius: kind === "square" ? randInt(8, 16) : undefined,
-  });
-  const cellSpecs = kinds.slice(0, 4).map(specFor);
-  const changedIndex = randInt(0, 3);
-  return {
-    baseSpec: cellSpecs[changedIndex],
-    cellSpecs,
-    changedIndex,
-    changedSpec: specFor(kinds[4]),
-    changeKind: "swap",
-    userSelection: null,
-  };
-}
-
 export function setupShapeShiftRound(rampIn: number): ShapeShiftRoundData {
-  const { lo, hi, frac } = rampParts(rampIn);
-  /* Rolled from the ramp, not a constant — this used to short-circuit before
-     the level was even read. */
-  if (Math.random() < lerp(SHIFT_LINEUP_CHANCE[lo], SHIFT_LINEUP_CHANCE[hi], frac))
-    return setupShiftLineupRound();
+  const level = clampLevel(rampIn);
+  const i = level - 1;
+  const distinct = SHIFT_DISTINCT_KINDS[i];
+  const [magLo, magHi] = SHIFT_MAGNITUDE[i];
 
-  const wSwap = lerp(SHIFT_TIER_WEIGHTS[lo][0], SHIFT_TIER_WEIGHTS[hi][0], frac);
-  const wCoarse = lerp(SHIFT_TIER_WEIGHTS[lo][1], SHIFT_TIER_WEIGHTS[hi][1], frac);
-  const roll = Math.random();
-  const tier = roll < wSwap ? "swap" : roll < wSwap + wCoarse ? "coarse" : "fine";
+  /* Build the board: `distinct` different kinds spread over four cells. */
+  const pool = shuffle(SHIFT_KINDS).slice(0, distinct);
+  const cellKinds: ShapeKind[] = [];
+  for (let c = 0; c < 4; c++) cellKinds.push(pool[c % distinct]);
+  const laidOut = shuffle(cellKinds);
 
-  const kind = pick(SHIFT_KINDS);
-  const baseSpec: ShapeSpec = {
-    kind,
+  const rotationFor = (k: ShapeKind) => (k === "square" ? 0 : randInt(-8, 8));
+  const specFor = (k: ShapeKind): ShapeSpec => ({
+    kind: k,
     scale: 0.82,
-    rotation: kind === "square" ? 0 : randInt(-8, 8),
-    radius: kind === "square" ? randInt(8, 16) : undefined,
-  };
+    rotation: rotationFor(k),
+    radius: k === "square" ? randInt(8, 16) : undefined,
+  });
+  const cellSpecs = laidOut.map(specFor);
 
-  let changeKind: ShapeChangeKind;
+  const changedIndex = randInt(0, 3);
+  const baseSpec = cellSpecs[changedIndex];
   const changedSpec: ShapeSpec = { ...baseSpec };
 
-  if (tier === "swap") {
+  /* A swap only makes sense once every cell already differs; otherwise the
+     changed cell would be the lone odd shape on a matching board. */
+  const canSwap = SHIFT_ALLOW_SWAP[i] && distinct === 4;
+  const doSwap = canSwap && Math.random() < 0.3;
+
+  let changeKind: ShapeChangeKind;
+  if (doSwap) {
     changeKind = "swap";
-    changedSpec.kind = pick(ALL_KINDS.filter((k) => k !== kind));
+    const taken = new Set(laidOut);
+    const spare = ALL_KINDS.filter((k) => !taken.has(k));
+    changedSpec.kind = spare.length ? pick(spare) : pick(ALL_KINDS.filter((k) => k !== baseSpec.kind));
     if (changedSpec.kind !== "square") changedSpec.radius = undefined;
+    else changedSpec.radius = randInt(8, 16);
   } else {
-    const mag =
-      tier === "coarse"
-        ? rand(
-            lerp(SHIFT_COARSE_MAGNITUDE[lo][0], SHIFT_COARSE_MAGNITUDE[hi][0], frac),
-            lerp(SHIFT_COARSE_MAGNITUDE[lo][1], SHIFT_COARSE_MAGNITUDE[hi][1], frac)
-          )
-        : lerp(SHIFT_FINE_MAGNITUDE[lo], SHIFT_FINE_MAGNITUDE[hi], frac);
-    const kinds: ShapeChangeKind[] = kind === "square" ? ["rotation", "size", "radius"] : ["rotation", "size"];
-    changeKind = pick(kinds);
+    const mag = rand(magLo, magHi);
+    const axes: ShapeChangeKind[] =
+      baseSpec.kind === "square" ? ["rotation", "size", "radius"] : ["rotation", "size"];
+    changeKind = pick(axes);
     const dir = Math.random() > 0.5 ? 1 : -1;
 
     if (changeKind === "rotation") {
@@ -482,7 +428,7 @@ export function setupShapeShiftRound(rampIn: number): ShapeShiftRoundData {
     }
   }
 
-  return { baseSpec, changedIndex: randInt(0, 3), changedSpec, changeKind, userSelection: null };
+  return { baseSpec, cellSpecs, changedIndex, changedSpec, changeKind, userSelection: null };
 }
 
 /* ------------------------------------------------------------------ */

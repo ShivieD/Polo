@@ -50,7 +50,7 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult }) => {
   const [lastOutcome, setLastOutcome] = useState<RunOutcome | null>(null);
   const [timedOut, setTimedOut] = useState(false);
   const squareRef = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ corner: number; single: boolean } | null>(null);
+  const drag = useRef<{ corner: number; single: boolean; rect: DOMRect } | null>(null);
   /* Which handle is being dragged, and whether that drag is shaping just
      that one corner (⌘/Ctrl-drag, or the touch toggle) or all four at
      once — drives the recede-while-dragging look */
@@ -87,8 +87,13 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult }) => {
 
   const applyDrag = (clientX: number, clientY: number) => {
     const active = drag.current;
-    const rect = squareRef.current?.getBoundingClientRect();
-    if (!active || !rect) return;
+    if (!active) return;
+    /* The square's box is measured ONCE, at pointer-down, and reused for the
+       whole gesture. Re-measuring per move fed a loop: the radius readout
+       below changes width as digits come and go, the layout reflows, the
+       square shifts a pixel or two, the next move measures the moved box and
+       computes a slightly different radius — which the eye reads as jitter. */
+    const rect = active.rect;
 
     /* Inward distance from the active corner along both edges */
     const lx = active.corner === 1 || active.corner === 2 ? rect.right - clientX : clientX - rect.left;
@@ -109,7 +114,9 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult }) => {
   const handleHandleDown = (corner: number) => (e: React.PointerEvent<HTMLButtonElement>) => {
     if (stage !== "answer") return;
     const single = e.metaKey || e.ctrlKey || cornerMode === "one";
-    drag.current = { corner, single };
+    const rect = squareRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    drag.current = { corner, single, rect };
     setActiveCorner(corner);
     setDragIsSingle(single);
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -204,6 +211,7 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult }) => {
         onBack={onBack}
         streak={prog.streak}
         points={prog.points}
+        level={prog.level}
         mono
         lives={<LivesBar lives={prog.lives} />}
         onReset={prog.requestReset}
@@ -243,11 +251,21 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult }) => {
             <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-ink">
               Rebuild the corners
             </span>
-            {/* Workbench on the left, clock + readout + modifier hint stacked
-                beside it — columns instead of rows, so the CTA stays in the fold */}
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-10 w-full">
+            {/* Stacked vertically: clock, then the workbench, then the readout
+                and modifier hint. Keeping the variable-width readout out of the
+                square's own row is also what stops the square shifting mid-drag. */}
+            <div className="flex flex-col items-center gap-5 w-full">
+            {prog.timerSeconds !== null && (
+              <RunTimer
+                id="squircle-run-timer"
+                seconds={prog.timerSeconds}
+                running={stage === "answer"}
+                runKey={round}
+                onExpire={handleTimeout}
+              />
+            )}
             {/* The workbench: the square plus its four corner handles */}
-            <div ref={squareRef} className="relative w-56 h-56 sm:w-64 sm:h-64 shrink-0 touch-none select-none">
+            <div ref={squareRef} className="relative w-48 h-48 sm:w-56 sm:h-56 shrink-0 touch-none select-none">
               <div
                 id="squircle-interactive-box"
                 className="w-full h-full bg-ink"
@@ -267,18 +285,11 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult }) => {
               ))}
             </div>
 
-            <div className="flex flex-col items-center sm:items-start gap-3 sm:max-w-[16rem]">
-              {prog.timerSeconds !== null && (
-                <RunTimer
-                  id="squircle-run-timer"
-                  seconds={prog.timerSeconds}
-                  running={stage === "answer"}
-                  runKey={round}
-                  onExpire={handleTimeout}
-                />
-              )}
+            <div className="flex flex-col items-center gap-2.5">
+              {/* Each value padded to a fixed width so the line cannot change
+                  size as the numbers grow and shrink under the drag. */}
               <span className="font-mono font-extrabold text-[11px] tracking-[0.12em] uppercase text-mut tabular-nums">
-                Corners · {roundData.guessRadii.map((r) => Math.round(r)).join(" · ")}
+                Corners · {roundData.guessRadii.map((r) => String(Math.round(r)).padStart(2, "\u2007")).join(" · ")}
               </span>
               {phase > 0 && (
                 <>
@@ -327,8 +338,9 @@ export const SquircleGame: React.FC<GameProps> = ({ onBack, onResult }) => {
             <OutcomeNote outcome={lastOutcome} />
 
             {/* Truth and guess side by side — truth in ink, yours mid-grey —
-                with the explanation alongside rather than stacked beneath */}
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-5 sm:gap-9 w-full">
+                with the explanation stacked beneath the pair rather than
+                sitting alongside it. */}
+            <div className="flex flex-col items-center justify-center gap-5 w-full">
               <div className="flex items-end gap-6 shrink-0">
                 <div className="flex flex-col items-center gap-2.5">
                   {squircle(roundData.trueRadii, "w-28 h-28 sm:w-32 sm:h-32", "squircle-reveal-target")}

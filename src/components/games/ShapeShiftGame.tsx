@@ -118,6 +118,7 @@ export const ShapeShiftGame: React.FC<GameProps> = ({ onBack, onResult }) => {
         onBack={onBack}
         streak={prog.streak}
         points={prog.points}
+        level={prog.level}
         mono
         lives={<LivesBar lives={prog.lives} />}
         onReset={prog.requestReset}

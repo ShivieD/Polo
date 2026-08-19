@@ -7,11 +7,11 @@ import React, { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { ShapeTallyRoundData } from "../../types";
 import { setupShapeTallyRound, getShapeTallyParams } from "../../utils/shapeLogic";
-import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, Btn, Wobble } from "../ui/Kit";
+import { GameHead, Ready, Countdown, VerdictHead, Btn, Wobble } from "../ui/Kit";
 import { useProgression, LivesBar, RunTimer, OutcomeNote } from "../ui/Progress";
 import { RunOutcome } from "../../utils/progression";
 import { ShapeTallyGlyph } from "../ui/ShapeGlyphs";
-import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
+import { playTick, playDrop, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
 interface GameProps {
   accentColor: string;
@@ -56,7 +56,7 @@ export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult }) => {
         if (popped < total) {
           popped++;
           setVisibleCount(popped);
-          playTick();
+          playDrop();
         } else {
           clearInterval(interval);
           setTimeout(() => setStage("answer"), 850);
@@ -150,6 +150,7 @@ export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult }) => {
         onBack={onBack}
         streak={prog.streak}
         points={prog.points}
+        level={prog.level}
         mono
         lives={<LivesBar lives={prog.lives} />}
         onReset={prog.requestReset}
@@ -230,17 +231,10 @@ export const ShapeTallyGame: React.FC<GameProps> = ({ onBack, onResult }) => {
             />
             <OutcomeNote outcome={lastOutcome} />
 
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-5 sm:gap-9 w-full">
-              <Wobble active={!isUserCorrect} className="shrink-0">{board("w-48 h-48", 2.0, false)}</Wobble>
-
-              <VerdictBody
-              detail={
-                isUserCorrect
-                  ? `${roundData.trueCount} pieces with no color to chunk by — sharp counting. The drops come faster next round.`
-                  : `There were ${roundData.trueCount}. The tempo stays put until you nail it — group the pieces in threes as they land.`
-                }
-              />
-            </div>
+            {/* Board alone, centred. The commentary line that used to sit
+                beside it pushed the column off-centre and only restated the
+                true count already shown in the verdict. */}
+            <Wobble active={!isUserCorrect} className="shrink-0">{board("w-48 h-48", 2.0, false)}</Wobble>
 
             <Btn id="shapetally-next-btn" variant="secondary" onClick={handleNextRound}>
               {isUserCorrect ? "Next scatter" : "Try again"}

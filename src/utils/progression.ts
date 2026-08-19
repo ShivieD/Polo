@@ -90,12 +90,12 @@ export const countdownFor = (gameId: GameId, level: number): number | null => {
   return table[Math.min(level, table.length) - 1];
 };
 
-/* Continuous difficulty: level plus the fraction of the current 5-run
-   cycle already cleared, so run 5 of a level plays almost like run 1 of
-   the next. Games feed this float into their param getters — continuous
-   knobs interpolate, discrete knobs bump near the cycle's end. */
-export const difficultyRamp = (p: GameProgress, gameId: GameId): number =>
-  Math.min(MAX_LEVEL[gameId], p.level + p.runsInLevel / RUNS_PER_LEVEL);
+/* Difficulty is a step function of the level and nothing else. It used to
+   add runsInLevel/5, which meant a board could get harder — or swap recipe
+   outright — part-way through a cycle with no level-up to explain it. Every
+   run inside a level now draws from exactly the same difficulty band; what
+   varies between runs is the randomised content, not the challenge. */
+export const difficultyRamp = (p: GameProgress, _gameId: GameId): number => p.level;
 
 /* Points cost of one extra life, indexed by current level (1-based).
    25 / 75 / 150 then a roughly 2x ramp; Shape Match's L7-L8 extend it. */
@@ -161,7 +161,6 @@ export function reportRun(gameId: GameId, passed: boolean, points: number): RunO
   const p = getProgress(gameId);
   const maxLevel = MAX_LEVEL[gameId];
   let kind: RunOutcome["kind"];
-  let livesBefore = p.lives;
 
   p.bestRunScore = Math.max(p.bestRunScore, Math.max(0, Math.round(points)));
 
@@ -209,7 +208,10 @@ export function reportRun(gameId: GameId, passed: boolean, points: number): RunO
     newLevel: p.level,
     pointsEarned: kind === "streakBroken" ? 0 : Math.max(0, Math.round(points)),
     livesLeft: p.lives,
-    promptBuyLife: p.lives === 1 && livesBefore > 1,
+    /* Offered whenever the player is down to their last life or out, not
+       only on the single run that crossed the threshold — that fired once
+       and then went quiet for the rest of the cycle. */
+    promptBuyLife: p.lives <= 1,
     mastered: leveledUp && p.level >= maxLevel,
   };
 }

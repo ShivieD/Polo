@@ -530,7 +530,15 @@ export function useProgression(gameId: GameId): Progression {
         setToast({ level: outcome.newLevel });
         submitStats(gameId, getProgress(gameId).pointsTotal, getProgress(gameId).streakBest);
       }
-      if (outcome.promptBuyLife) setBuyOpen(true);
+      /* A run that breaks the streak gets the rescue offer INSTEAD of the
+         buy-a-life offer. Showing both stacked one dialog behind the other,
+         so buying the streak back was immediately followed by a second,
+         near-identical prompt. */
+      const offersRescue =
+        outcome.kind === "streakBroken" &&
+        before.streakCurrent > 0 &&
+        before.pointsTotal >= lifeCost(before.level);
+      if (outcome.promptBuyLife && !offersRescue) setBuyOpen(true);
       if (outcome.kind === "streakBroken" && before.streakCurrent > 0) {
         /* Streak just died at 0 lives — offer to buy it back on the spot */
         if (before.pointsTotal >= lifeCost(before.level)) {
@@ -583,10 +591,15 @@ export function useProgression(gameId: GameId): Progression {
             initial={{ scale: 0.4, rotate: -8 }}
             animate={{ scale: 1, rotate: 0 }}
             transition={{ type: "spring", stiffness: 300, damping: 14 }}
-            className="w-20 h-20 rounded-2xl bg-ink text-paper font-mono font-extrabold text-2xl flex items-center justify-center"
+            className="text-5xl"
+            role="img"
+            aria-label="party popper"
           >
-            L{toast.level}
+            {"\uD83C\uDF89"}
           </motion.span>
+          <span className="w-16 h-16 rounded-2xl bg-ink text-paper font-mono font-extrabold text-xl flex items-center justify-center">
+            L{toast.level}
+          </span>
           <div>
             <div className="font-display font-extrabold text-xl text-ink mb-1.5">Congrats!</div>
             <p className="text-[14px] text-mut leading-relaxed">
@@ -611,20 +624,49 @@ export function useProgression(gameId: GameId): Progression {
 
       {buyOpen && !toast && (
         <Overlay id="buy-life-modal" key="buy">
+          {/* Two genuinely different situations, so two different messages.
+              One life left is a warning; none left means the next miss ends
+              the streak outright. */}
+          <motion.span
+            initial={{ scale: 0.4, rotate: -10 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: "spring", stiffness: 300, damping: 14 }}
+            className="text-5xl"
+            role="img"
+            aria-label={progress.lives === 0 ? "empty battery" : "warning"}
+          >
+            {progress.lives === 0 ? "\uD83E\uDEAB" : "\u26A0\uFE0F"}
+          </motion.span>
           <LivesBar lives={progress.lives} />
           <div>
-            <div className="font-display font-extrabold text-xl text-ink mb-1.5">Last life in reserve</div>
+            <div className="font-display font-extrabold text-xl text-ink mb-1.5">
+              {progress.lives === 0 ? "No lives in reserve" : "One life left"}
+            </div>
             <p className="text-[14px] text-mut leading-relaxed">
-              Trade <b className="text-ink">{cost} points</b> for one extra life? You have{" "}
-              <b className="text-ink tabular-nums">{progress.pointsTotal}</b> points.
+              {progress.lives === 0 ? (
+                <>
+                  The next miss ends your streak
+                  {progress.streakCurrent > 0 ? (
+                    <> of <b className="text-ink tabular-nums">{progress.streakCurrent}</b></>
+                  ) : null}
+                  . Buy a reserve life for <b className="text-ink">{cost} points</b>? You have{" "}
+                  <b className="text-ink tabular-nums">{progress.pointsTotal}</b>.
+                </>
+              ) : (
+                <>
+                  Your last reserve is in play. Stock up now for{" "}
+                  <b className="text-ink">{cost} points</b> and a miss spends the spare instead of your
+                  streak. You have <b className="text-ink tabular-nums">{progress.pointsTotal}</b> points.
+                </>
+              )}
             </p>
           </div>
           <div className="flex flex-wrap gap-3 justify-center">
             <Btn id="buy-life-decline-btn" variant="secondary" onClick={() => setBuyOpen(false)}>
-              Not now
+              {progress.lives === 0 ? "Risk it" : "Not now"}
             </Btn>
             <Btn id="buy-life-confirm-btn" onClick={handleBuy} disabled={progress.pointsTotal < cost || progress.lives >= MAX_LIVES}>
-              Buy a life
+              Buy a reserve
             </Btn>
           </div>
         </Overlay>
@@ -632,14 +674,26 @@ export function useProgression(gameId: GameId): Progression {
 
       {rescue && !toast && (
         <Overlay id="rescue-modal" key="rescue">
+          <motion.span
+            initial={{ scale: 0.4, rotate: 8 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: "spring", stiffness: 300, damping: 14 }}
+            className="text-5xl"
+            role="img"
+            aria-label="breaking heart"
+          >
+            {"\uD83D\uDC94"}
+          </motion.span>
           <LivesBar lives={0} />
           <div>
-            <div className="font-display font-extrabold text-xl text-ink mb-1.5">Streak down — buy it back?</div>
+            <div className="font-display font-extrabold text-xl text-ink mb-1.5">
+              Your streak of {rescue.snapshot.streakCurrent} just broke
+            </div>
             <p className="text-[14px] text-mut leading-relaxed">
-              No lives left, so that miss broke your streak of{" "}
-              <b className="text-ink tabular-nums">{rescue.snapshot.streakCurrent}</b>. Trade{" "}
-              <b className="text-ink">{cost} points</b> for a life to keep it alive? You have{" "}
-              <b className="text-ink tabular-nums">{progress.pointsTotal}</b> points.
+              You had no lives in reserve to absorb that miss. Spend{" "}
+              <b className="text-ink">{cost} points</b> to undo the break and carry the streak on? You
+              have <b className="text-ink tabular-nums">{progress.pointsTotal}</b>. This is the only
+              offer — take it or the streak is gone.
             </p>
           </div>
           <div className="flex flex-wrap gap-3 justify-center">
