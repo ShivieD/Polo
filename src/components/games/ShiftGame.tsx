@@ -69,14 +69,12 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }
   /* Columns are chosen so the grid never runs past two rows — the tile count
      climbs to nine, and a third row would push the CTA below the fold. */
   const tileCount = roundData.originalColors.length;
-  const gridCols =
-    tileCount <= 4
-      ? "grid-cols-4"
-      : tileCount <= 6
-        ? "grid-cols-3"
-        : tileCount <= 8
-          ? "grid-cols-4"
-          : "grid-cols-5";
+  const cols = tileCount <= 4 ? 4 : tileCount <= 6 ? 3 : tileCount <= 8 ? 4 : 5;
+  /* Laid out as centred flex-wrap rather than a grid: with 5 tiles in 3
+     columns the grid left-aligned the 2 leftovers, which made the Before and
+     After boards look like they held different numbers of tiles. */
+  const tileW = { width: `calc((100% - ${(cols - 1) * 12}px) / ${cols})` };
+  const rowCls = "flex flex-wrap justify-center gap-3";
 
   return (
     <div id="shift-game-container" className="w-full flex flex-col flex-1 max-w-3xl mx-auto">
@@ -118,7 +116,7 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }
             <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-mut">
               Memorize all four
             </span>
-            <div className={`grid ${gridCols} gap-3 w-full max-w-lg`}>
+            <div className={`${rowCls} w-full max-w-lg`}>
               {roundData.originalColors.map((color, idx) => (
                 <motion.div
                   key={idx}
@@ -126,8 +124,8 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }
                   initial={{ opacity: 0, scale: 0.7 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: idx * 0.07, type: "spring", stiffness: 400, damping: 20 }}
-                  className="aspect-square w-full rounded-2xl"
-                  style={{ backgroundColor: hslToCss(color) }}
+                  className="aspect-square rounded-2xl"
+                  style={{ ...tileW, backgroundColor: hslToCss(color) }}
                 />
               ))}
             </div>
@@ -145,14 +143,14 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }
             <span className="font-mono font-extrabold text-[12px] tracking-[0.18em] uppercase text-ink">
               Tap the block that changed
             </span>
-            <div className={`grid ${gridCols} gap-3 w-full max-w-lg`}>
-              {roundData.shiftedColors.map((color, idx) => (
+            <div className={`${rowCls} w-full max-w-lg`}>
+              {roundData.originalColors.map((_, idx) => (
                 <button
                   key={idx}
                   id={`shift-answer-square-${idx}`}
                   onClick={() => handleSelectSquare(idx)}
-                  className="cell-pop aspect-square w-full rounded-2xl cursor-pointer"
-                  style={{ backgroundColor: hslToCss(color) }}
+                  className="cell-pop aspect-square rounded-2xl cursor-pointer"
+                  style={{ ...tileW, backgroundColor: hslToCss(roundData.shiftedColors[idx]) }}
                   aria-label={`Block ${idx + 1}`}
                 />
               ))}
@@ -173,14 +171,14 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }
               {/* Both grids at full, true color — no fading. Before and after sit
                   side by side so the pair costs one row of height, not two.
                   Tags live BELOW the tiles so they never blend into a swatch. */}
-              <div className="grid grid-cols-2 gap-6 w-full">
-                <div>
+              <div className="grid grid-cols-2 gap-0 w-full">
+                <div className="pr-6">
                   <div className="font-mono font-extrabold text-[11px] tracking-[0.16em] uppercase text-mut mb-2.5">
                     Before
                   </div>
-                  <div className={`grid ${gridCols} gap-3`}>
+                  <div className={rowCls}>
                     {roundData.originalColors.map((color, idx) => (
-                      <div key={idx} className="flex flex-col items-center gap-1.5">
+                      <div key={idx} className="flex flex-col items-center gap-1.5" style={tileW}>
                         <div
                           id={`shift-original-reveal-square-${idx}`}
                           className={`aspect-square w-full rounded-2xl ${
@@ -202,16 +200,19 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }
                   </div>
                 </div>
 
-                <div>
+                <div className="pl-6 border-l-[1.5px] border-line">
                   <div className="font-mono font-extrabold text-[11px] tracking-[0.16em] uppercase text-mut mb-2.5">
                     After
                   </div>
-                  <div className={`grid ${gridCols} gap-3`}>
-                    {roundData.shiftedColors.map((color, idx) => {
+                  <div className={rowCls}>
+                    {/* Driven off originalColors so Before and After are
+                        structurally guaranteed to render the same tile count. */}
+                    {roundData.originalColors.map((_, idx) => {
+                      const color = roundData.shiftedColors[idx];
                       const isShifted = roundData.shiftedIndex === idx;
                       const isSelected = roundData.userSelection === idx;
                       return (
-                        <div key={idx} className="flex flex-col items-center gap-1.5">
+                        <div key={idx} className="flex flex-col items-center gap-1.5" style={tileW}>
                           <div
                             id={`shift-reveal-square-${idx}`}
                             className={`aspect-square w-full rounded-2xl ${

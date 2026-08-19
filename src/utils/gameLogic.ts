@@ -21,7 +21,10 @@ import {
    each level adds one more (L6 = 10 impostors + the true color). */
 export function setupSwatchRound(ramp = 1): SwatchRoundData {
   const targetColor = generateRandomColor();
-  const level = Math.max(1, Math.min(6, Math.floor(ramp + 0.4)));
+  /* Floor the ramp rather than rounding it: the option count must hold for a
+     whole cycle and step only when the next level is actually reached. The
+     +0.4 made the board grow mid-level, on run 4 of 5. */
+  const level = Math.max(1, Math.min(6, Math.floor(ramp)));
   const options = generateSwatchOptions(targetColor, 4 + level);
   return {
     targetColor,
@@ -210,7 +213,9 @@ export function setupBetweenRound(): BetweenRoundData {
 /* Spot the Difference: the level adds a tile — L1 is the classic 4,
    L6 reaches 9. */
 export function setupShiftRound(ramp = 1): ShiftRoundData {
-  const tiles = 3 + Math.max(1, Math.min(6, Math.floor(ramp + 0.4)));
+  /* Floored for the same reason as Color Match — the grid must not gain a
+     tile part-way through a level. */
+  const tiles = 3 + Math.max(1, Math.min(6, Math.floor(ramp)));
   const startHue = Math.floor(Math.random() * 360);
   const originalColors: HSL[] = [];
 
