@@ -64,6 +64,9 @@ export interface EchoParams {
 }
 
 export interface BetweenRoundData {
+  /* The gradient's colour stops, left to right. One more stop per level:
+     two at L1 (a plain A-to-B ramp), seven by L6. */
+  stops: HSL[];
   colorStart: HSL;
   colorEnd: HSL;
   truePosition: number; // 0.0 to 1.0

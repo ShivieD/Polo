@@ -163,6 +163,7 @@ export const ChainGame: React.FC<GameProps> = ({ onBack, onResult }) => {
         onBack={onBack}
         streak={prog.streak}
         points={prog.points}
+        level={prog.level}
         mono
         gameId="chain"
         lives={<LivesBar lives={prog.lives} />}

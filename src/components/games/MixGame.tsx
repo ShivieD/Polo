@@ -268,6 +268,7 @@ export const MixGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }) 
         onBack={onBack}
         streak={prog.streak}
         points={prog.points}
+        level={prog.level}
         lives={<LivesBar lives={prog.lives} />}
         onReset={prog.requestReset}
         gameId="mix"

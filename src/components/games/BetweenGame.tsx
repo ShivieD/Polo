@@ -6,7 +6,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { motion } from "motion/react";
 import { BetweenRoundData } from "../../types";
-import { setupBetweenRound, interpolateHsl } from "../../utils/gameLogic";
+import { setupBetweenRound, sampleStops } from "../../utils/gameLogic";
 import { hslToCss } from "../../utils/color";
 import { GameHead, Ready, Countdown, VerdictHead, VerdictBody, Btn, PassNote } from "../ui/Kit";
 import { useProgression, LivesBar, RunTimer, OutcomeNote } from "../ui/Progress";
@@ -28,7 +28,7 @@ const CTA_ACCENT = "#ffc400";
 export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }) => {
   const prog = useProgression("between");
   const [stage, setStage] = useState<"getReady" | "countdown" | "stimulus" | "answer" | "reveal">("getReady");
-  const [roundData, setRoundData] = useState<BetweenRoundData>(() => setupBetweenRound());
+  const [roundData, setRoundData] = useState<BetweenRoundData>(() => setupBetweenRound(prog.ramp));
   const [round, setRound] = useState(1);
   const [lastOutcome, setLastOutcome] = useState<RunOutcome | null>(null);
   const [timedOut, setTimedOut] = useState(false);
@@ -37,7 +37,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, accentColor
   /* Next run waits for the CTA — no auto-advance */
   const handleNextRound = () => {
     setTimedOut(false);
-    setRoundData(setupBetweenRound());
+    setRoundData(setupBetweenRound(prog.ramp));
     setRound((r) => r + 1);
     setStage("countdown");
   };
@@ -99,11 +99,12 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, accentColor
     setStage("reveal");
   };
 
-  const targetColor = interpolateHsl(roundData.colorStart, roundData.colorEnd, roundData.truePosition);
+  const targetColor = sampleStops(roundData.stops, roundData.truePosition);
 
-  /* 21-stop gradient so CSS matches the short-hue-path HSL math exactly */
-  const gradientStops = Array.from({ length: 21 }, (_, i) =>
-    hslToCss(interpolateHsl(roundData.colorStart, roundData.colorEnd, i / 20))
+  /* Sampled densely rather than handed to CSS as stops, so the painted ramp
+     matches the short-hue-path HSL maths the answer is scored against. */
+  const gradientStops = Array.from({ length: 41 }, (_, i) =>
+    hslToCss(sampleStops(roundData.stops, i / 40))
   );
   const gradientStyle = `linear-gradient(to right, ${gradientStops.join(", ")})`;
 
@@ -126,6 +127,7 @@ export const BetweenGame: React.FC<GameProps> = ({ onBack, onResult, accentColor
         onBack={onBack}
         streak={prog.streak}
         points={prog.points}
+        level={prog.level}
         lives={<LivesBar lives={prog.lives} />}
         onReset={prog.requestReset}
         gameId="between"

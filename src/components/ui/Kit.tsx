@@ -158,13 +158,14 @@ export const GameHead: React.FC<{
   onBack: () => void;
   streak?: number;
   points?: number;
+  level?: number;
   id?: string;
   mono?: boolean;
   lives?: React.ReactNode;
   onReset?: () => void;
   gameId?: GameId;
   accent?: string;
-}> = ({ title, onBack, streak, points, id, mono = false, lives, onReset, gameId, accent }) => {
+}> = ({ title, onBack, streak, points, level, id, mono = false, lives, onReset, gameId, accent }) => {
   const [boardOpen, setBoardOpen] = useState(false);
   const [namePromptAction, setNamePromptAction] = useState<"back" | "reset" | null>(null);
 
@@ -218,6 +219,14 @@ export const GameHead: React.FC<{
           className="font-display font-extrabold text-[15px] sm:text-[17px] tracking-tight text-ink tabular-nums whitespace-nowrap"
         >
           {points}pts
+        </span>
+      )}
+      {typeof level === "number" && (
+        <span
+          id="game-level-chip"
+          className="font-mono font-extrabold text-[11px] tracking-[0.1em] uppercase rounded-full px-2.5 py-1 tabular-nums border-[1.5px] border-ink text-ink"
+        >
+          L{level}
         </span>
       )}
       {typeof streak === "number" && streak > 0 && (

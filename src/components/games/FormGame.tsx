@@ -81,6 +81,7 @@ export const FormGame: React.FC<GameProps> = ({ onBack, onResult }) => {
         onBack={onBack}
         streak={prog.streak}
         points={prog.points}
+        level={prog.level}
         mono
         gameId="form"
         lives={<LivesBar lives={prog.lives} />}

@@ -83,6 +83,7 @@ export const ShiftGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }
         onBack={onBack}
         streak={prog.streak}
         points={prog.points}
+        level={prog.level}
         gameId="shift"
         accent={accentColor}
         lives={<LivesBar lives={prog.lives} />}

@@ -159,9 +159,14 @@ export function generateRandomColor(): HSL {
 }
 
 // Generate an array of 5 near distractors + the correct color, shuffled.
+/* `band` is the CIEDE2000-derived similarity window a distractor must land
+   in: higher means more similar to the target, so a tighter, higher band is
+   a harder board. Color Match walks this up once the tile count has topped
+   out, so difficulty keeps climbing after the grid stops growing. */
 export function generateSwatchOptions(
   correctColor: HSL,
-  distractors = 5
+  distractors = 5,
+  band: [number, number] = [75, 96]
 ): { color: HSL; isCorrect: boolean }[] {
   const options: { color: HSL; isCorrect: boolean }[] = [{ color: correctColor, isCorrect: true }];
 
@@ -174,20 +179,24 @@ export function generateSwatchOptions(
     while (tooClose && attempts < 10) {
       attempts++;
       // Apply subtle variation
-      const hOffset = (Math.random() > 0.5 ? 1 : -1) * (Math.floor(Math.random() * 16) + 8); // 8 to 24 deg
-      const sOffset = (Math.random() > 0.5 ? 1 : -1) * (Math.floor(Math.random() * 12) + 6); // 6 to 18 %
-      const lOffset = (Math.random() > 0.5 ? 1 : -1) * (Math.floor(Math.random() * 10) + 5); // 5 to 15 %
+      /* Offsets scale down as the required similarity climbs, so a tight
+         band is reachable inside the retry budget instead of falling through
+         to whatever the last attempt produced. */
+      const tight = Math.max(0.35, Math.min(1, (100 - band[0]) / 25));
+      const hOffset = (Math.random() > 0.5 ? 1 : -1) * (Math.random() * 16 + 8) * tight;
+      const sOffset = (Math.random() > 0.5 ? 1 : -1) * (Math.random() * 12 + 6) * tight;
+      const lOffset = (Math.random() > 0.5 ? 1 : -1) * (Math.random() * 10 + 5) * tight;
       
       distractor = {
-        h: (correctColor.h + hOffset + 360) % 360,
-        s: Math.max(15, Math.min(95, correctColor.s + sOffset)),
-        l: Math.max(20, Math.min(85, correctColor.l + lOffset)),
+        h: Math.round((correctColor.h + hOffset + 360) % 360),
+        s: Math.round(Math.max(15, Math.min(95, correctColor.s + sOffset))),
+        l: Math.round(Math.max(20, Math.min(85, correctColor.l + lOffset))),
       };
       
       // Compute score difference to make sure they are not exactly the same or too far
       // (band recalibrated for the CIEDE2000-based score)
       const score = getScoreForColors(correctColor, distractor);
-      if (score >= 75 && score <= 96) {
+      if (score >= band[0] && score <= band[1]) {
         tooClose = false;
       }
     }

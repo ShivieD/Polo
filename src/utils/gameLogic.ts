@@ -19,18 +19,20 @@ import {
 
 /* Color Match: the level adds distractor tiles — L1 has 5 impostors,
    each level adds one more (L6 = 10 impostors + the true color). */
+/* Tile count grows one at a time to a ceiling of six (L1 four, L3 six), and
+   from there difficulty carries on through similarity instead: the band the
+   distractors must fall inside climbs, so the wrong answers crowd closer to
+   the target even though the grid has stopped growing. */
+const SWATCH_TILES = [4, 5, 6, 6, 6, 6];
+const SWATCH_BAND: [number, number][] = [
+  [72, 88], [74, 90], [76, 91], [83, 94], [88, 96], [92, 98],
+];
+
 export function setupSwatchRound(ramp = 1): SwatchRoundData {
-  const targetColor = generateRandomColor();
-  /* Floor the ramp rather than rounding it: the option count must hold for a
-     whole cycle and step only when the next level is actually reached. The
-     +0.4 made the board grow mid-level, on run 4 of 5. */
   const level = Math.max(1, Math.min(6, Math.floor(ramp)));
-  const options = generateSwatchOptions(targetColor, 4 + level);
-  return {
-    targetColor,
-    options,
-    userSelection: null,
-  };
+  const targetColor = generateRandomColor();
+  const options = generateSwatchOptions(targetColor, SWATCH_TILES[level - 1] - 1, SWATCH_BAND[level - 1]);
+  return { targetColor, options, userSelection: null };
 }
 
 /* Color Mixer rounds by level:
@@ -116,20 +118,10 @@ const ECHO_TABLE = [
   { boxes: 9, seqLen: 10, speed: 320 },
 ];
 export const getEchoParamsForLevel = (ramp: number): EchoParams => {
-  const t = Math.max(1, Math.min(6, ramp));
-  const lo = ECHO_TABLE[Math.floor(t) - 1];
-  const hi = ECHO_TABLE[Math.min(6, Math.ceil(t)) - 1];
-  const frac = t - Math.floor(t);
-  /* Discrete knobs bump on the cycle's back half */
-  const disc = frac >= 0.6 ? hi : lo;
-  const boxes = disc.boxes;
-  const seqLen = disc.seqLen;
-  return {
-    boxes,
-    seqLen,
-    speed: Math.round(lo.speed + (hi.speed - lo.speed) * frac),
-    allowRepeat: seqLen > boxes,
-  };
+  /* One row per level, taken whole. The sequence length used to bump on the
+     cycle's back half, so a level could grow a step without a level-up. */
+  const row = ECHO_TABLE[Math.floor(Math.max(1, Math.min(6, ramp))) - 1];
+  return { boxes: row.boxes, seqLen: row.seqLen, speed: row.speed, allowRepeat: row.seqLen > row.boxes };
 };
 
 export function getEchoParams(level: number): EchoParams {
@@ -188,30 +180,67 @@ export function setupEchoRound(params: EchoParams = getEchoParams(0)): EchoRound
   };
 }
 
-export function setupBetweenRound(): BetweenRoundData {
-  const colorStart = generateRandomColor();
-  
-  // Make end color contrasting / distinct hue (diff >= 60)
-  const hueDiff = 60 + Math.floor(Math.random() * 120);
-  const colorEnd = {
-    h: (colorStart.h + hueDiff) % 360,
-    s: Math.max(30, Math.min(90, colorStart.s + (Math.random() > 0.5 ? 15 : -15))),
-    l: Math.max(35, Math.min(75, colorStart.l + (Math.random() > 0.5 ? 10 : -10))),
-  };
+/* Find the Spot builds its ramp from colour stops, one more per level: two
+   at L1 (a plain A-to-B fade), seven at L6. Hue always walks in a single
+   direction so no colour appears twice — a gradient that doubles back would
+   make two positions equally correct. The extra difficulty comes from the
+   saturation and lightness wobbling between stops, which is what stops you
+   reading position off brightness alone. */
+export function sampleStops(stops: HSL[], t: number): HSL {
+  if (stops.length < 2) return stops[0];
+  const clamped = Math.max(0, Math.min(1, t));
+  const seg = clamped * (stops.length - 1);
+  const i = Math.min(stops.length - 2, Math.floor(seg));
+  return interpolateHsl(stops[i], stops[i + 1], seg - i);
+}
 
-  const truePosition = 0.15 + Math.random() * 0.7; // Avoid extreme edges (0.15 to 0.85)
+export function setupBetweenRound(ramp = 1): BetweenRoundData {
+  const level = Math.max(1, Math.min(6, Math.floor(ramp)));
+  const stopCount = level + 1;
+
+  const dir = Math.random() > 0.5 ? 1 : -1;
+  /* Total hue travel is held in a band no matter how many stops share it, so
+     the walk never laps back onto a hue it already used. */
+  const totalSpan = 150 + Math.random() * 60;
+  const h0 = Math.floor(Math.random() * 360);
+
+  /* Stop positions are evenly spread then jittered, keeping their order */
+  const fracs = [0];
+  for (let i = 1; i < stopCount - 1; i++) {
+    fracs.push(i / (stopCount - 1) + (Math.random() - 0.5) * 0.1);
+  }
+  if (stopCount > 1) fracs.push(1);
+  fracs.sort((a, b) => a - b);
+
+  const baseS = 55 + Math.random() * 20;
+  const baseL = 45 + Math.random() * 15;
+  /* Kept modest on purpose: at higher amplitudes the saturation/lightness
+     drift could make two far-apart positions read as the same colour, which
+     costs the player points for an answer that looked right. */
+  const wobble = (level - 1) * 2.2;
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+  const stops: HSL[] = fracs.map((f) => ({
+    h: Math.round((h0 + dir * totalSpan * f + 720) % 360),
+    s: Math.round(clamp(baseS + (Math.random() - 0.5) * 2 * wobble, 30, 90)),
+    l: Math.round(clamp(baseL + (Math.random() - 0.5) * 2 * wobble, 35, 75)),
+  }));
+
+  /* Early levels keep the answer clear of the ends where the reference
+     swatches sit; later ones use the full ribbon. */
+  const inset = 0.22 - (level - 1) * 0.025;
+  const truePosition = inset + Math.random() * (1 - inset * 2);
 
   return {
-    colorStart,
-    colorEnd,
+    stops,
+    colorStart: stops[0],
+    colorEnd: stops[stops.length - 1],
     truePosition,
     guessPosition: 0.5,
     score: null,
   };
 }
 
-/* Spot the Difference: the level adds a tile — L1 is the classic 4,
-   L6 reaches 9. */
 export function setupShiftRound(ramp = 1): ShiftRoundData {
   /* Floored for the same reason as Color Match — the grid must not gain a
      tile part-way through a level. */
@@ -344,12 +373,9 @@ const tallyCountFor = (ramp: number) => {
 
 /* Dots-mode drop tempo, ms per piece, interpolated along the ramp */
 const TALLY_SPEED = [250, 215, 180, 150, 120, 95];
-export const getTallyPopSpeed = (ramp: number): number => {
-  const t = Math.max(1, Math.min(6, ramp));
-  const lo = TALLY_SPEED[Math.floor(t) - 1];
-  const hi = TALLY_SPEED[Math.min(6, Math.ceil(t)) - 1];
-  return Math.round(lo + (hi - lo) * (t - Math.floor(t)));
-};
+/* Stepped by level, not interpolated across a cycle — see difficultyRamp. */
+export const getTallyPopSpeed = (ramp: number): number =>
+  TALLY_SPEED[Math.floor(Math.max(1, Math.min(6, ramp))) - 1];
 
 export function setupTallyRound(ramp: number = 1, mode: TallyMode = "dots"): TallyRoundData {
   if (mode === "shapes") {
@@ -393,6 +419,7 @@ export function setupTallyShapesRound(ramp: number = 1): TallyRoundData {
 }
 
 // Linear color interpolation
+
 export function interpolateHsl(colorA: HSL, colorB: HSL, fraction: number): HSL {
   // To interpolate H, handle cyclic behavior
   let hA = colorA.h;

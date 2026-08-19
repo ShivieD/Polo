@@ -11,7 +11,7 @@ import { GameHead, Ready, VerdictHead, VerdictBody, Btn, Wobble, Countdown } fro
 import { useProgression, LivesBar, RunTimer, OutcomeNote } from "../ui/Progress";
 import { RunOutcome } from "../../utils/progression";
 import { TallyGlyph } from "../ui/Glyphs";
-import { playTick, playRevealInterval, triggerHaptic } from "../../utils/audio";
+import { playTick, playDrop, playRevealInterval, triggerHaptic } from "../../utils/audio";
 
 interface GameProps {
   accentColor: string;
@@ -153,7 +153,7 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }
         if (dotsPopped < totalDots) {
           dotsPopped++;
           setVisibleDotsCount(dotsPopped);
-          playTick();
+          playDrop();
         } else {
           clearInterval(interval);
           setTimeout(() => setStage("answer"), 850);
@@ -276,6 +276,7 @@ export const TallyGame: React.FC<GameProps> = ({ onBack, onResult, accentColor }
         onBack={onBack}
         streak={prog.streak}
         points={prog.points}
+        level={prog.level}
         gameId="tally"
         accent={accentColor}
         lives={<LivesBar lives={prog.lives} />}
