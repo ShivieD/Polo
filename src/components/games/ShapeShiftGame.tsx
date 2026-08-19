@@ -184,11 +184,19 @@ export const ShapeShiftGame: React.FC<GameProps> = ({ onBack, onResult }) => {
               {/* Before and after — the changed shape wears the solid ink
                   outline, a wrong pick the thin dashed mid-grey one. Side by
                   side from sm up so the verdict and CTA stay in the fold. */}
-              <div className="flex flex-col sm:flex-row sm:justify-center gap-6 sm:gap-10 w-full">
+              <div className="flex flex-col sm:flex-row sm:justify-center gap-6 sm:gap-0 w-full">
                 {(["Before", "After"] as const).map((label) => {
                   const after = label === "After";
                   return (
-                    <div key={label} className="sm:flex-1 sm:max-w-sm">
+                    /* The two boards used to sit in a plain row and read as one
+                       continuous strip of eight tiles. A rule and generous
+                       inline padding split them without costing any height. */
+                    <div
+                      key={label}
+                      className={`sm:flex-1 sm:max-w-sm ${
+                        after ? "sm:pl-10 sm:border-l-[1.5px] sm:border-line" : "sm:pr-10"
+                      }`}
+                    >
                       <div className="font-mono font-extrabold text-[11px] tracking-[0.16em] uppercase text-mut mb-2.5">
                         {label}
                       </div>

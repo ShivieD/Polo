@@ -211,6 +211,28 @@ export default function App() {
   const [streaks, setStreaks] = useState<StreakMap>(loadStreaks);
   const [flood, setFlood] = useState<Flood | null>(null);
 
+  /* Safety net for the tile->game transition. The flood advances on Motion's
+     onAnimationComplete, which never fires in environments that throttle
+     requestAnimationFrame (headless browsers, background tabs, some remote
+     desktops). Without this the overlay sticks and the app is unreachable
+     with no way back. The timer is cleared the moment the callback lands, so
+     it only ever fires when the animation genuinely stalled. */
+  useEffect(() => {
+    if (!flood) return;
+    const ms = flood.phase === "expand" ? 900 : 700;
+    const t = setTimeout(() => {
+      setFlood((cur) => {
+        if (!cur || cur.phase !== flood.phase) return cur;
+        if (cur.phase === "expand") {
+          setScreen(cur.id);
+          return { ...cur, phase: "fade" };
+        }
+        return null;
+      });
+    }, ms);
+    return () => clearTimeout(t);
+  }, [flood?.id, flood?.phase]);
+
   /* The toggle stamps the choice on <html>, where the token overrides live */
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);

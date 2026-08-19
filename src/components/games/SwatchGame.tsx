@@ -52,6 +52,13 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, accentColor 
     correct.s === roundData.userSelection.s &&
     correct.l === roundData.userSelection.l;
 
+  /* Options run 6 (L1) to 11 (L6). A fixed 6-column grid left-aligned the
+     remainder — at L2 that is a single lonely tile under a full row — so the
+     board is laid out as centred flex-wrap with an explicit per-tile width. */
+  const swatchCols = Math.min(6, roundData.options.length);
+  const swatchTileW = { width: `calc((100% - ${(swatchCols - 1) * 12}px) / ${swatchCols})` };
+  const swatchRowCls = "flex flex-wrap justify-center gap-3";
+
   useEffect(() => {
     if (stage === "reveal") playRevealInterval();
   }, [stage]);
@@ -138,7 +145,7 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, accentColor 
                 onExpire={handleTimeout}
               />
             )}
-            <div className="grid grid-cols-6 gap-3 w-full max-w-2xl">
+            <div className={`${swatchRowCls} w-full max-w-2xl`}>
               {roundData.options.map((opt, idx) => (
                 <motion.button
                   key={idx}
@@ -147,8 +154,8 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, accentColor 
                   initial={{ opacity: 0, y: 18, scale: 0.9 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ delay: idx * 0.05, type: "spring", stiffness: 380, damping: 20 }}
-                  className="cell-pop aspect-square w-full rounded-2xl cursor-pointer"
-                  style={{ backgroundColor: hslToCss(opt.color) }}
+                  className="cell-pop aspect-square rounded-2xl cursor-pointer"
+                  style={{ ...swatchTileW, backgroundColor: hslToCss(opt.color) }}
                   aria-label={`Color option ${idx + 1}`}
                 />
               ))}
@@ -168,7 +175,7 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, accentColor 
             <Wobble active={!isUserCorrect} className="w-full max-w-2xl flex justify-center">
               {/* Every color stays at full strength; tags sit BELOW the
                   swatches so they never blend into a similar color */}
-              <div className="grid grid-cols-6 gap-3 w-full">
+              <div className={`${swatchRowCls} w-full`}>
                 {roundData.options.map((opt, idx) => {
                   const isSelected =
                     !!roundData.userSelection &&
@@ -177,7 +184,7 @@ export const SwatchGame: React.FC<GameProps> = ({ onBack, onResult, accentColor 
                     roundData.userSelection.l === opt.color.l;
 
                   return (
-                    <div key={idx} className="flex flex-col items-center gap-1.5">
+                    <div key={idx} className="flex flex-col items-center gap-1.5" style={swatchTileW}>
                       <div
                         id={`swatch-reveal-option-${idx}`}
                         className={`aspect-square w-full rounded-2xl ${

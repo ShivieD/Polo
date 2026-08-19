@@ -71,10 +71,11 @@ export function setupFormRound(rampIn: number): FormRoundData {
      numeric knobs tighten with cycle progress so every run is a shade
      harder than the last. */
   const t = Math.max(1, Math.min(FORM_MAX_LEVEL, rampIn));
-  const fl = Math.floor(t);
-  const rawFrac = t - fl;
-  const level = rawFrac >= 0.6 ? Math.min(FORM_MAX_LEVEL, fl + 1) : fl;
-  const f = rawFrac >= 0.6 ? 0 : rawFrac / 0.6; // progress within this recipe
+  const level = Math.floor(t);
+  /* Cycle progress 0->1. The recipe is pinned to the level for the whole
+     cycle: only the numeric knobs inside it tighten run by run, so the board
+     never changes composition mid-level. runsInLevel/5 tops out at 0.8. */
+  const f = Math.min(1, (t - level) / 0.8);
   const mixT = (a: number, b: number) => a + (b - a) * f;
   const kind = pick(ALL_KINDS);
   let specs: ShapeSpec[];
@@ -127,22 +128,29 @@ export function setupFormRound(rampIn: number): FormRoundData {
     targetIdx = aspects.indexOf(1);
   } else if (level === 6) {
     /* Same shape, varying line weight or fill */
-    const paints: Partial<ShapeSpec>[] = shuffle([
-      { filled: true },
-      { filled: false, strokeW: 4 },
-      { filled: false, strokeW: 7 },
-      { filled: false, strokeW: 11 },
-      { filled: false, strokeW: 16 },
-      { filled: false, strokeW: 22 },
-    ]);
-    specs = paints.map((p) => ({ kind, ...p }));
+    /* Every tile is stroked at the same fill state — only line weight
+       separates them, on a geometric ladder whose ratio closes run by run.
+       The old set opened with a FILLED tile among five outlines and jumped
+       4->22px, which made L6 read easier than L5's aspect work. */
+    /* Ratio picked so the closest pair separates by less than L5's aspect
+       work and hands off cleanly to L7's size steps. Base 6 keeps the
+       ladder centred on the app's default weight of 7, which keeps the
+       closest pair separated by ~1 CSS pixel on an 82px tile — the ratios,
+       and so the difficulty, are identical to a thinner base. */
+    const ratio = mixT(1.15, 1.12);
+    const weights = shuffle([0, 1, 2, 3, 4, 5].map((k) => 7 * Math.pow(ratio, k)));
+    specs = weights.map((strokeW) => ({ kind, filled: false, strokeW }));
     targetIdx = randInt(0, 5);
   } else {
     /* L7→L8: proportional size steps shrink continuously 12% → 7% */
     const step = level === 7 ? mixT(0.12, 0.095) : mixT(0.095, 0.07);
-    const base = 0.72;
-    const factors = shuffle([0, 1, 2, -1, -2, 3].map((k) => Math.pow(1 + step, k)));
-    specs = factors.map((f) => ({ kind, scale: Math.min(1, base * f) }));
+    const exps = [0, 1, 2, -1, -2, 3];
+    /* Anchor the largest tile just under the 1.0 ceiling. The old fixed 0.72
+       base pushed the top step past 1 and the clamp flattened the widest gap
+       from 12% to ~10.7%, so two tiles sat closer than the level intended. */
+    const base = 0.98 / Math.pow(1 + step, Math.max(...exps));
+    const factors = shuffle(exps.map((k) => Math.pow(1 + step, k)));
+    specs = factors.map((fac) => ({ kind, scale: base * fac }));
     targetIdx = randInt(0, 5);
   }
 
@@ -364,17 +372,25 @@ export function scoreSquircle(
    - fine:   a subtle change from the per-level table (hard)
    Higher levels skew harder but easy rounds never fully disappear. */
 const SHIFT_FINE_MAGNITUDE = [14, 11, 9, 7, 5, 3.5];
+/* Coarse changes were a flat rand(19,28) at every level, so a fifth of L6
+   rounds arrived as blatant as L1's. The band now closes with the level. */
+const SHIFT_COARSE_MAGNITUDE: [number, number][] = [
+  [19, 28], [17, 25], [15, 22], [13, 19], [11, 16], [9, 13],
+];
 /* L1 used to be half free swaps and no subtle rounds at all, which made the
    opening levels a formality. Swaps are cut back and a real share of fine
    rounds is present from L1 — the ladder still climbs, it just starts
    somewhere worth playing. */
+/* [swap, coarse, fine]. A swap turns the shape into a different family —
+   unmissable, so it survives only as a first-levels teaching aid and is gone
+   by L5 rather than lingering at 5% forever. */
 const SHIFT_TIER_WEIGHTS: [number, number, number][] = [
-  [0.18, 0.5, 0.32],
-  [0.14, 0.45, 0.41],
-  [0.11, 0.39, 0.5],
-  [0.09, 0.33, 0.58],
-  [0.07, 0.28, 0.65],
-  [0.05, 0.23, 0.72],
+  [0.18, 0.50, 0.32],
+  [0.12, 0.46, 0.42],
+  [0.06, 0.40, 0.54],
+  [0.02, 0.32, 0.66],
+  [0.00, 0.24, 0.76],
+  [0.00, 0.15, 0.85],
 ];
 
 /* Kinds where every change type stays visible (no circles — rotation
@@ -386,7 +402,9 @@ const SHIFT_KINDS: ShapeKind[] = ["square", "triangle", "arrow", "hexagon", "plu
    drifting. Constant across levels so the challenge TYPE stays
    unpredictable from round one; the attribute rounds carry the
    level-driven subtlety ramp. */
-const SHIFT_LINEUP_CHANCE = 0.22;
+/* Mixed-family lineups are the easiest board in the game. They used to fire
+   at a flat 22% forever, which capped how hard the game could ever feel. */
+const SHIFT_LINEUP_CHANCE = [0.22, 0.15, 0.09, 0.04, 0.01, 0];
 
 /* A lineup round: every cell its own shape, the changed one comes back as
    a fifth kind not present in the original four. */
@@ -412,10 +430,12 @@ function setupShiftLineupRound(): ShapeShiftRoundData {
 }
 
 export function setupShapeShiftRound(rampIn: number): ShapeShiftRoundData {
-  if (Math.random() < SHIFT_LINEUP_CHANCE) return setupShiftLineupRound();
-
   const { lo, hi, frac } = rampParts(rampIn);
-  const level = clampLevel(rampIn);
+  /* Rolled from the ramp, not a constant — this used to short-circuit before
+     the level was even read. */
+  if (Math.random() < lerp(SHIFT_LINEUP_CHANCE[lo], SHIFT_LINEUP_CHANCE[hi], frac))
+    return setupShiftLineupRound();
+
   const wSwap = lerp(SHIFT_TIER_WEIGHTS[lo][0], SHIFT_TIER_WEIGHTS[hi][0], frac);
   const wCoarse = lerp(SHIFT_TIER_WEIGHTS[lo][1], SHIFT_TIER_WEIGHTS[hi][1], frac);
   const roll = Math.random();
@@ -439,7 +459,10 @@ export function setupShapeShiftRound(rampIn: number): ShapeShiftRoundData {
   } else {
     const mag =
       tier === "coarse"
-        ? rand(19, 28)
+        ? rand(
+            lerp(SHIFT_COARSE_MAGNITUDE[lo][0], SHIFT_COARSE_MAGNITUDE[hi][0], frac),
+            lerp(SHIFT_COARSE_MAGNITUDE[lo][1], SHIFT_COARSE_MAGNITUDE[hi][1], frac)
+          )
         : lerp(SHIFT_FINE_MAGNITUDE[lo], SHIFT_FINE_MAGNITUDE[hi], frac);
     const kinds: ShapeChangeKind[] = kind === "square" ? ["rotation", "size", "radius"] : ["rotation", "size"];
     changeKind = pick(kinds);
